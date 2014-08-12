@@ -6,7 +6,7 @@ extra-y := head.o vmlinux.lds
 
 obj-y := align.o coprocessor.o entry.o irq.o pci-dma.o platform.o process.o \
 	 ptrace.o setup.o signal.o stacktrace.o syscall.o time.o traps.o \
-	 vectors.o
+	 vectors.o cycles.o
 
 obj-$(CONFIG_PCI) += pci.o
 obj-$(CONFIG_MODULES) += xtensa_ksyms.o module.o
