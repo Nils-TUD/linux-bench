@@ -1759,6 +1759,17 @@ static void shrink_readahead_size_eio(struct file *filp,
 	ra->ra_pages /= 4;
 }
 
+extern unsigned memcpy_cycles;
+
+static unsigned _get_cycles(void) {
+    unsigned val;
+    __asm__ volatile (
+        "rsr    %0, CCOUNT;"
+        : "=a" (val) : : "memory"
+    );
+    return val;
+}
+
 /**
  * do_generic_file_read - generic file read routine
  * @filp:	the file to read
@@ -1898,7 +1909,9 @@ page_ok:
 		 * now we can copy it to user space...
 		 */
 
+		unsigned before = _get_cycles();
 		ret = copy_page_to_iter(page, offset, nr, iter);
+		memcpy_cycles += _get_cycles() - before;
 		offset += ret;
 		index += offset >> PAGE_SHIFT;
 		offset &= ~PAGE_MASK;
@@ -2831,7 +2844,9 @@ again:
 		if (mapping_writably_mapped(mapping))
 			flush_dcache_page(page);
 
+		unsigned start = _get_cycles();
 		copied = iov_iter_copy_from_user_atomic(page, i, offset, bytes);
+		memcpy_cycles += _get_cycles() - start;
 		flush_dcache_page(page);
 
 		status = a_ops->write_end(file, mapping, pos, bytes, copied,
