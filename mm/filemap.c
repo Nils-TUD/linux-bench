@@ -36,6 +36,8 @@
 #include <linux/memcontrol.h>
 #include <linux/cleancache.h>
 #include <linux/rmap.h>
+#include <linux/cycles.h>
+#include <linux/smemcpy.h>
 #include "internal.h"
 
 #define CREATE_TRACE_POINTS
@@ -1757,17 +1759,6 @@ static void shrink_readahead_size_eio(struct file *filp,
 					struct file_ra_state *ra)
 {
 	ra->ra_pages /= 4;
-}
-
-extern unsigned memcpy_cycles;
-
-static unsigned _get_cycles(void) {
-    unsigned val;
-    __asm__ volatile (
-        "rsr    %0, CCOUNT;"
-        : "=a" (val) : : "memory"
-    );
-    return val;
 }
 
 /**

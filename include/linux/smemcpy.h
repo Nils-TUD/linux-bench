@@ -3,6 +3,8 @@
 
 #include <linux/linkage.h>
 
+extern unsigned memcpy_cycles;
+
 asmlinkage long sys_memcpy(unsigned *val);
 
 #endif
