@@ -162,8 +162,8 @@
 #define XCHAL_ICACHE_LINEWIDTH		5	/* log2(I line size in bytes) */
 #define XCHAL_DCACHE_LINEWIDTH		5	/* log2(D line size in bytes) */
 
-#define XCHAL_ICACHE_SIZE		16384	/* I-cache size in bytes or 0 */
-#define XCHAL_DCACHE_SIZE		16384	/* D-cache size in bytes or 0 */
+#define XCHAL_ICACHE_SIZE		65536	/* I-cache size in bytes or 0 */
+#define XCHAL_DCACHE_SIZE		65536	/* D-cache size in bytes or 0 */
 
 #define XCHAL_DCACHE_IS_WRITEBACK	1	/* writeback feature */
 #define XCHAL_DCACHE_IS_COHERENT	0	/* MP coherence feature */
@@ -189,8 +189,8 @@
 /*  If present, cache size in bytes == (ways * 2^(linewidth + setwidth)).  */
 
 /*  Number of cache sets in log2(lines per way):  */
-#define XCHAL_ICACHE_SETWIDTH		7
-#define XCHAL_DCACHE_SETWIDTH		7
+#define XCHAL_ICACHE_SETWIDTH		9
+#define XCHAL_DCACHE_SETWIDTH		9
 
 /*  Cache set associativity (number of ways):  */
 #define XCHAL_ICACHE_WAYS		4
