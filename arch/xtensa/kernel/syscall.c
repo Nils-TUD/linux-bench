@@ -30,6 +30,8 @@
 #include <linux/cycles.h>
 #include <linux/smemcpy.h>
 
+#include "systimes.h"
+
 typedef void (*syscall_t)(void);
 
 syscall_t sys_call_table[__NR_syscall_count] /* FIXME __cacheline_aligned */= {

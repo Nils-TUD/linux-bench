@@ -32,6 +32,7 @@
 #include <asm/pgtable.h>
 #include <asm/ptrace.h>
 
+#include "systimes.h"
 
 void user_enable_single_step(struct task_struct *child)
 {
@@ -471,6 +472,8 @@ long arch_ptrace(struct task_struct *child, long request,
 
 unsigned long do_syscall_trace_enter(struct pt_regs *regs)
 {
+	systimes_enter(regs);
+
 	if (test_thread_flag(TIF_SYSCALL_TRACE) &&
 	    tracehook_report_syscall_entry(regs))
 		return -1;
@@ -481,6 +484,8 @@ unsigned long do_syscall_trace_enter(struct pt_regs *regs)
 void do_syscall_trace_leave(struct pt_regs *regs)
 {
 	int step;
+
+	systimes_leave(regs);
 
 	step = test_thread_flag(TIF_SINGLESTEP);
 
