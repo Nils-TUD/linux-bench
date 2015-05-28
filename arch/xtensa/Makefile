@@ -47,6 +47,8 @@ KBUILD_CFLAGS += -pipe -mlongcalls
 
 KBUILD_CFLAGS += $(call cc-option,-mforce-no-pic,)
 
+KBUILD_CFLAGS += -gdwarf-2
+
 ifneq ($(CONFIG_LD_NO_RELAX),)
 LDFLAGS := --no-relax
 endif
