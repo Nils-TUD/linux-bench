@@ -490,7 +490,7 @@ common_exception_return:
 	 * We need to check some flags for signal handling and rescheduling,
 	 * and have to restore WB and WS, extra states, and all registers
 	 * in the register file that were in use in the user task.
-	 * Note that we don't disable interrupts here. 
+	 * Note that we don't disable interrupts here.
 	 */
 
 	_bbsi.l	a4, TIF_NEED_RESCHED, 3f
@@ -1706,8 +1706,8 @@ ENTRY(fast_second_level_miss)
 
 2:	/* Special case for cache aliasing.
 	 * We (should) only get here if a clear_user_page, copy_user_page
-	 * or the aliased cache flush functions got preemptively interrupted 
-	 * by another task. Re-establish temporary mapping to the 
+	 * or the aliased cache flush functions got preemptively interrupted
+	 * by another task. Re-establish temporary mapping to the
 	 * TLBTEMP_BASE areas.
 	 */
 
@@ -1895,11 +1895,15 @@ ENTRY(system_call)
 	/* regs->syscall = regs->areg[2] */
 
 	l32i	a3, a2, PT_AREG2
+#ifndef DISABLE_STRACE_SUPPORT
 	mov	a6, a2
 	movi	a4, do_syscall_trace_enter
+#endif
 	s32i	a3, a2, PT_SYSCALL
+#ifndef DISABLE_STRACE_SUPPORT
 	callx4	a4
 	mov	a3, a6
+#endif
 
 	/* syscall = sys_call_table[syscall_nr] */
 
@@ -1930,9 +1934,11 @@ ENTRY(system_call)
 1:	/* regs->areg[2] = return_value */
 
 	s32i	a6, a2, PT_AREG2
+#ifndef DISABLE_STRACE_SUPPORT
 	movi	a4, do_syscall_trace_leave
 	mov	a6, a2
 	callx4	a4
+#endif
 	retw
 
 ENDPROC(system_call)

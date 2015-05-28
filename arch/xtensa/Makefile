@@ -71,6 +71,10 @@ else
 KBUILD_CPPFLAGS += $(patsubst %,-I$(srctree)/%include,$(vardirs) $(plfdirs))
 endif
 
+ifeq ($(DISABLE_STRACE_SUPPORT),1)
+KBUILD_CPPFLAGS += -DDISABLE_STRACE_SUPPORT
+endif
+
 KBUILD_DEFCONFIG := iss_defconfig
 
 # Only build variant and/or platform if it includes a Makefile
