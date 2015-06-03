@@ -287,6 +287,7 @@ pipe_read(struct kiocb *iocb, struct iov_iter *to)
 			unsigned before = _get_cycles();
 			written = copy_page_to_iter(buf->page, buf->offset, chars, to);
 			memcpy_cycles += _get_cycles() - before;
+			memcpy_bytes += written;
 			if (unlikely(written < chars)) {
 				if (!ret)
 					ret = -EFAULT;
@@ -396,6 +397,7 @@ pipe_write(struct kiocb *iocb, struct iov_iter *from)
 			unsigned before = _get_cycles();
 			ret = copy_page_from_iter(buf->page, offset, chars, from);
 			memcpy_cycles += _get_cycles() - before;
+			memcpy_bytes += ret;
 			if (unlikely(ret < chars)) {
 				ret = -EFAULT;
 				goto out;
@@ -440,6 +442,7 @@ pipe_write(struct kiocb *iocb, struct iov_iter *from)
 			unsigned before = _get_cycles();
 			copied = copy_page_from_iter(page, 0, PAGE_SIZE, from);
 			memcpy_cycles += _get_cycles() - before;
+			memcpy_bytes += copied;
 			if (unlikely(copied < PAGE_SIZE && iov_iter_count(from))) {
 				if (!ret)
 					ret = -EFAULT;

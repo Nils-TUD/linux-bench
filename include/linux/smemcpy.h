@@ -4,7 +4,8 @@
 #include <linux/linkage.h>
 
 extern unsigned memcpy_cycles;
+extern unsigned memcpy_bytes;
 
-asmlinkage long sys_memcpy(unsigned *val);
+asmlinkage long sys_memcpy(unsigned *cycles, unsigned *bytes);
 
 #endif

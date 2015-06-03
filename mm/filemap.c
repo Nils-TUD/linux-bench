@@ -1903,6 +1903,7 @@ page_ok:
 		unsigned before = _get_cycles();
 		ret = copy_page_to_iter(page, offset, nr, iter);
 		memcpy_cycles += _get_cycles() - before;
+		memcpy_bytes += ret;
 		offset += ret;
 		index += offset >> PAGE_SHIFT;
 		offset &= ~PAGE_MASK;
@@ -2838,6 +2839,7 @@ again:
 		unsigned start = _get_cycles();
 		copied = iov_iter_copy_from_user_atomic(page, i, offset, bytes);
 		memcpy_cycles += _get_cycles() - start;
+		memcpy_bytes += copied;
 		flush_dcache_page(page);
 
 		status = a_ops->write_end(file, mapping, pos, bytes, copied,
