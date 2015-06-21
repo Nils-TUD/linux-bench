@@ -7,6 +7,8 @@
 #include <linux/mm.h>
 #include <linux/uaccess.h>
 #include <linux/hardirq.h>
+#include <linux/cycles.h>
+#include <linux/smemcpy.h>
 
 #include <asm/cacheflush.h>
 
@@ -194,15 +196,18 @@ static inline void zero_user_segments(struct page *page,
 	unsigned start1, unsigned end1,
 	unsigned start2, unsigned end2)
 {
+	unsigned before;
 	void *kaddr = kmap_atomic(page);
 
 	BUG_ON(end1 > PAGE_SIZE || end2 > PAGE_SIZE);
 
+	before = _get_cycles();
 	if (end1 > start1)
 		memset(kaddr + start1, 0, end1 - start1);
 
 	if (end2 > start2)
 		memset(kaddr + start2, 0, end2 - start2);
+	memcpy_cycles += _get_cycles() - before;
 
 	kunmap_atomic(kaddr);
 	flush_dcache_page(page);
