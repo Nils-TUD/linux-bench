@@ -1777,6 +1777,7 @@ static void shrink_readahead_size_eio(struct file *filp,
 static ssize_t do_generic_file_read(struct file *filp, loff_t *ppos,
 		struct iov_iter *iter, ssize_t written)
 {
+	unsigned before;
 	struct address_space *mapping = filp->f_mapping;
 	struct inode *inode = mapping->host;
 	struct file_ra_state *ra = &filp->f_ra;
@@ -1900,7 +1901,7 @@ page_ok:
 		 * now we can copy it to user space...
 		 */
 
-		unsigned before = _get_cycles();
+		before = _get_cycles();
 		ret = copy_page_to_iter(page, offset, nr, iter);
 		memcpy_cycles += _get_cycles() - before;
 		memcpy_bytes += ret;
@@ -2790,6 +2791,7 @@ EXPORT_SYMBOL(grab_cache_page_write_begin);
 ssize_t generic_perform_write(struct file *file,
 				struct iov_iter *i, loff_t pos)
 {
+	unsigned start;
 	struct address_space *mapping = file->f_mapping;
 	const struct address_space_operations *a_ops = mapping->a_ops;
 	long status = 0;
@@ -2836,7 +2838,7 @@ again:
 		if (mapping_writably_mapped(mapping))
 			flush_dcache_page(page);
 
-		unsigned start = _get_cycles();
+		start = _get_cycles();
 		copied = iov_iter_copy_from_user_atomic(page, i, offset, bytes);
 		memcpy_cycles += _get_cycles() - start;
 		memcpy_bytes += copied;
