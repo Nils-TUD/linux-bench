@@ -1,10 +1,10 @@
 #include <linux/smemcpy.h>
 #include <asm/uaccess.h>
 
-unsigned memcpy_cycles = 0;
-unsigned memcpy_bytes = 0;
+unsigned long memcpy_cycles = 0;
+unsigned long memcpy_bytes = 0;
 
-asmlinkage long sys_memcpy(unsigned *cycles, unsigned *bytes) {
+asmlinkage long sys_memcpy(unsigned long *cycles, unsigned long *bytes) {
     put_user(memcpy_cycles, cycles);
     if(bytes)
         put_user(memcpy_bytes, bytes);

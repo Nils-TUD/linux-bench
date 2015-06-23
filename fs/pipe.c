@@ -252,7 +252,7 @@ static const struct pipe_buf_operations packet_pipe_buf_ops = {
 static ssize_t
 pipe_read(struct kiocb *iocb, struct iov_iter *to)
 {
-	unsigned before;
+	unsigned long before;
 	size_t total_len = iov_iter_count(to);
 	struct file *filp = iocb->ki_filp;
 	struct pipe_inode_info *pipe = filp->private_data;
@@ -363,7 +363,7 @@ static inline int is_packetized(struct file *file)
 static ssize_t
 pipe_write(struct kiocb *iocb, struct iov_iter *from)
 {
-	unsigned before;
+	unsigned long before;
 	struct file *filp = iocb->ki_filp;
 	struct pipe_inode_info *pipe = filp->private_data;
 	ssize_t ret = 0;

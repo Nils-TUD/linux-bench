@@ -3,7 +3,7 @@
 
 #include <linux/linkage.h>
 
-static unsigned _get_cycles(void) {
+static unsigned long _get_cycles(void) {
     unsigned val;
     __asm__ volatile (
         "rsr    %0, CCOUNT;"
@@ -12,7 +12,7 @@ static unsigned _get_cycles(void) {
     return val;
 }
 
-asmlinkage long sys_get_cycles(unsigned *val);
+asmlinkage long sys_get_cycles(unsigned long *val);
 
 #endif
 

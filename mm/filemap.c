@@ -1777,7 +1777,7 @@ static void shrink_readahead_size_eio(struct file *filp,
 static ssize_t do_generic_file_read(struct file *filp, loff_t *ppos,
 		struct iov_iter *iter, ssize_t written)
 {
-	unsigned before;
+	unsigned long before;
 	struct address_space *mapping = filp->f_mapping;
 	struct inode *inode = mapping->host;
 	struct file_ra_state *ra = &filp->f_ra;
@@ -2791,7 +2791,7 @@ EXPORT_SYMBOL(grab_cache_page_write_begin);
 ssize_t generic_perform_write(struct file *file,
 				struct iov_iter *i, loff_t pos)
 {
-	unsigned start;
+	unsigned long start;
 	struct address_space *mapping = file->f_mapping;
 	const struct address_space_operations *a_ops = mapping->a_ops;
 	long status = 0;
