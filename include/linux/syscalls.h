@@ -907,3 +907,6 @@ asmlinkage long sys_statx(int dfd, const char __user *path, unsigned flags,
 			  unsigned mask, struct statx __user *buffer);
 
 #endif
+
+asmlinkage long sys_get_cycles(unsigned long *val);
+asmlinkage long sys_memcpy(unsigned long *cycles, unsigned long *bytes);
