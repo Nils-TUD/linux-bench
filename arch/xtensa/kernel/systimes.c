@@ -6,10 +6,12 @@ unsigned sysc_counter = 0;
 unsigned syscall_nos[MAX_SYSCALL_TIMES];
 unsigned enter_times[MAX_SYSCALL_TIMES];
 unsigned leave_times[MAX_SYSCALL_TIMES];
+unsigned overhead_time = 0;
 
 asmlinkage long sys_syscreset(int pid) {
     sysc_pid = pid;
     sysc_counter = MAX_SYSCALL_TIMES - 1;
+    overhead_time = 0;
     return 0;
 }
 
