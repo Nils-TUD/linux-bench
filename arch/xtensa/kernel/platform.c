@@ -40,7 +40,7 @@ _F(void, pcibios_init, (void), { });
 #ifdef CONFIG_XTENSA_CALIBRATE_CCOUNT
 _F(void, calibrate_ccount, (void),
 {
-	pr_err("ERROR: Cannot calibrate cpu frequency! Assuming 10MHz.\n");
-	ccount_freq = 10 * 1000000UL;
+	pr_err("ERROR: Cannot calibrate cpu frequency! Assuming 100MHz.\n");
+	ccount_freq = 100 * 1000000UL;
 });
 #endif
