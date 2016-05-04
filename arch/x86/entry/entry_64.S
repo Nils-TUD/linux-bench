@@ -195,6 +195,23 @@ entry_SYSCALL_64_fastpath:
 	ja	1f				/* return -ENOSYS (already in pt_regs->ax) */
 	movq	%r10, %rcx
 
+#ifndef DISABLE_STRACE_SUPPORT
+        pushq %rdi
+        pushq %rsi
+        pushq %rdx
+        pushq %rcx
+        pushq %r8
+        pushq %r9
+        movq %rax,%rdi
+        call systimes_enter
+        popq %r9
+        popq %r8
+        popq %rcx
+        popq %rdx
+        popq %rsi
+        popq %rdi
+#endif
+
 	/*
 	 * This call instruction is handled specially in stub_ptregs_64.
 	 * It might end up jumping to the slow path.  If it jumps, RAX
@@ -204,6 +221,11 @@ entry_SYSCALL_64_fastpath:
 .Lentry_SYSCALL_64_after_fastpath_call:
 
 	movq	%rax, RAX(%rsp)
+
+#ifndef DISABLE_STRACE_SUPPORT
+        call systimes_leave
+#endif
+
 1:
 
 	/*

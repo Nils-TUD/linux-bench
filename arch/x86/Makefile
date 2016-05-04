@@ -218,6 +218,10 @@ KBUILD_CFLAGS += -fno-asynchronous-unwind-tables
 KBUILD_CFLAGS += $(mflags-y)
 KBUILD_AFLAGS += $(mflags-y)
 
+ifeq ($(DISABLE_STRACE_SUPPORT),1)
+KBUILD_CPPFLAGS += -DDISABLE_STRACE_SUPPORT
+endif
+
 archscripts: scripts_basic
 	$(Q)$(MAKE) $(build)=arch/x86/tools relocs
 

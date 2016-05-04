@@ -30,7 +30,7 @@
 #include <linux/cycles.h>
 #include <linux/smemcpy.h>
 
-#include "systimes.h"
+#include <linux/systimes.h>
 
 typedef void (*syscall_t)(void);
 

@@ -3,7 +3,7 @@
 
 #include <linux/linkage.h>
 
-static unsigned long _get_cycles(void) {
+static inline unsigned long _get_cycles(void) {
 #ifdef CONFIG_XTENSA
     unsigned val;
     __asm__ volatile (
