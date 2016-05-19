@@ -34,7 +34,7 @@ asmlinkage long sys_syscreset(int pid) {
 asmlinkage long sys_sysctrace(void) {
     unsigned i;
     for(i = 0; i < sysc_counter; ++i)
-        pr_notice(" [%3u] %3u %011u %011u\n", i, syscall_nos[i], enter_times[i], leave_times[i]);
+        pr_notice(" [%u] %u %u %u\n", i, syscall_nos[i], enter_times[i], leave_times[i]);
     sysc_pid = 0;
     return 0;
 }
