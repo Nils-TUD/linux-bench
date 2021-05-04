@@ -954,11 +954,12 @@ static int sifive_serial_probe(struct platform_device *pdev)
 		return PTR_ERR(base);
 	}
 
-	clk = devm_clk_get(&pdev->dev, NULL);
-	if (IS_ERR(clk)) {
-		dev_err(&pdev->dev, "unable to find controller clock\n");
-		return PTR_ERR(clk);
-	}
+	// clk = devm_clk_get(&pdev->dev, NULL);
+	// if (IS_ERR(clk)) {
+	// 	dev_err(&pdev->dev, "unable to find controller clock\n");
+	// 	return PTR_ERR(clk);
+	// }
+	clk = NULL;
 
 	id = of_alias_get_id(pdev->dev.of_node, "serial");
 	if (id < 0) {
@@ -990,15 +991,16 @@ static int sifive_serial_probe(struct platform_device *pdev)
 	ssp->clk = clk;
 	ssp->clk_notifier.notifier_call = sifive_serial_clk_notifier;
 
-	r = clk_notifier_register(ssp->clk, &ssp->clk_notifier);
-	if (r) {
-		dev_err(&pdev->dev, "could not register clock notifier: %d\n",
-			r);
-		goto probe_out1;
-	}
+	// r = clk_notifier_register(ssp->clk, &ssp->clk_notifier);
+	// if (r) {
+	// 	dev_err(&pdev->dev, "could not register clock notifier: %d\n",
+	// 		r);
+	// 	goto probe_out1;
+	// }
 
 	/* Set up clock divider */
-	ssp->clkin_rate = clk_get_rate(ssp->clk);
+	// ssp->clkin_rate = clk_get_rate(ssp->clk);
+	ssp->clkin_rate = 100000000;
 	ssp->baud_rate = SIFIVE_DEFAULT_BAUD_RATE;
 	ssp->port.uartclk = ssp->baud_rate * 16;
 	__ssp_update_div(ssp);
@@ -1036,8 +1038,8 @@ probe_out3:
 	__ssp_remove_console_port(ssp);
 	free_irq(ssp->port.irq, ssp);
 probe_out2:
-	clk_notifier_unregister(ssp->clk, &ssp->clk_notifier);
-probe_out1:
+	// clk_notifier_unregister(ssp->clk, &ssp->clk_notifier);
+// probe_out1:
 	return r;
 }
 
@@ -1048,7 +1050,7 @@ static int sifive_serial_remove(struct platform_device *dev)
 	__ssp_remove_console_port(ssp);
 	uart_remove_one_port(&sifive_serial_uart_driver, &ssp->port);
 	free_irq(ssp->port.irq, ssp);
-	clk_notifier_unregister(ssp->clk, &ssp->clk_notifier);
+	// clk_notifier_unregister(ssp->clk, &ssp->clk_notifier);
 
 	return 0;
 }
