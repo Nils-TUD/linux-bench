@@ -1042,6 +1042,10 @@ asmlinkage long sys_pidfd_getfd(int pidfd, int fd, unsigned int flags);
  * Architecture-specific system calls
  */
 
+/* arch/riscv/sysc_trace.c */
+asmlinkage long sys_syscreset(int pid);
+asmlinkage long sys_sysctrace(void);
+
 /* arch/x86/kernel/ioport.c */
 asmlinkage long sys_ioperm(unsigned long from, unsigned long num, int on);
 

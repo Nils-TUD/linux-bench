@@ -155,6 +155,8 @@ skip_context_tracking:
 	tail do_trap_unknown
 
 handle_syscall:
+	mv a0, a7
+	call sysc_trace_enter
 #ifdef CONFIG_RISCV_M_MODE
 	/*
 	 * When running is M-Mode (no MMU config), MPIE does not get set.
@@ -164,7 +166,8 @@ handle_syscall:
 	 */
 	csrs CSR_STATUS, SR_IE
 #endif
-#if defined(CONFIG_TRACE_IRQFLAGS) || defined(CONFIG_CONTEXT_TRACKING)
+	/* always restore them due to sysc_trace_enter */
+#if 1 || defined(CONFIG_TRACE_IRQFLAGS) || defined(CONFIG_CONTEXT_TRACKING)
 	/* Recover a0 - a7 for system calls */
 	REG_L a0, PT_A0(sp)
 	REG_L a1, PT_A1(sp)
@@ -207,6 +210,7 @@ check_syscall_nr:
 ret_from_syscall:
 	/* Set user a0 to kernel a0 */
 	REG_S a0, PT_A0(sp)
+	call sysc_trace_exit
 	/*
 	 * We didn't execute the actual syscall.
 	 * Seccomp already set return value for the current task pt_regs.
