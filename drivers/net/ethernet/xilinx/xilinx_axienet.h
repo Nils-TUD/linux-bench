@@ -17,6 +17,8 @@
 #include <linux/phy.h>
 #include <linux/of_platform.h>
 
+#include "xilinx_fifo.h"
+
 /* Packet size info */
 #define XAE_HDR_SIZE			14 /* Size of Ethernet header */
 #define XAE_TRL_SIZE			 4 /* Size of Ethernet trailer (FCS) */
@@ -788,6 +790,12 @@ struct axienet_local {
 	struct axienet_dma_q *dq[XAE_MAX_QUEUES];	/* DMA queue data*/
 
 	phy_interface_t phy_mode;
+
+    bool is_fifo;
+#ifdef CONFIG_XILINX_AXI_FIFO
+    XLlFifo fifo;
+    int fifo_irq;
+#endif
 
 	bool is_tsn;
 #ifdef CONFIG_XILINX_TSN

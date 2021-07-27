@@ -574,7 +574,7 @@ static int axienet_device_reset(struct net_device *ndev)
 			return ret;
 	}
 
-	if (!lp->is_tsn) {
+	if (!lp->is_tsn && !lp->is_fifo) {
 		for_each_rx_dma_queue(lp, i) {
 			q = lp->dq[i];
 			__axienet_device_reset(q);
@@ -597,7 +597,7 @@ static int axienet_device_reset(struct net_device *ndev)
 			lp->options |= XAE_OPTION_JUMBO;
 	}
 
-	if (!lp->is_tsn) {
+	if (!lp->is_tsn && !lp->is_fifo) {
 		ret = axienet_dma_bd_init(ndev);
 		if (ret < 0) {
 			netdev_err(ndev, "%s: descriptor allocation failed\n",
@@ -843,6 +843,30 @@ int axienet_queue_xmit(struct sk_buff *skb,
 	}
 
 	num_frag = skb_shinfo(skb)->nr_frags;
+
+	if (lp->is_fifo) {
+		unsigned int frame_len;
+
+		dev_dbg(&ndev->dev, "queue transmit (num_frag=%u)\n", num_frag);
+
+		if(num_frag != 0)
+			panic("Cannot deal with fragments");
+
+		// do we have space
+		frame_len = skb_headlen(skb);
+		if (XLlFifo_TxVacancy(&lp->fifo) < frame_len)
+			return NETDEV_TX_BUSY;
+
+		// write into FIFO
+		XLlFifo_Write(&lp->fifo, skb->data, frame_len);
+		// start transmission
+		XLlFifo_TxSetLen(&lp->fifo, frame_len);
+
+		ndev->stats.tx_packets += 1;
+		ndev->stats.tx_bytes += frame_len;
+
+		return NETDEV_TX_OK;
+	}
 
 	q = lp->dq[map];
 
@@ -1169,6 +1193,83 @@ static irqreturn_t axienet_eth_irq(int irq, void *_ndev)
 	return IRQ_HANDLED;
 }
 
+static void axienet_fifo_receive(struct net_device *ndev, XLlFifo *Fifo)
+{
+	struct axienet_local *lp = netdev_priv(ndev);
+	struct sk_buff *skb;
+	u32 length;
+
+	// While there is data in the fifo ...
+	while (XLlFifo_RxOccupancy(Fifo)) {
+		// allocate socket buffer
+		skb = netdev_alloc_skb(ndev, lp->max_frm_size);
+		if (!skb) {
+			dev_err(lp->dev, "No memory for skb\n");
+			break;
+		}
+
+		// get packet length
+		length = XLlFifo_RxGetLen(Fifo);
+
+		// read packet from FIFO
+		XLlFifo_Read(Fifo, skb->data, length);
+
+		skb_put(skb, length);
+		skb->protocol = eth_type_trans(skb, ndev);
+
+		skb->ip_summed = CHECKSUM_UNNECESSARY;
+		netif_receive_skb(skb);
+
+		ndev->stats.rx_packets += 1;
+		ndev->stats.rx_bytes += length;
+
+		dev_dbg(lp->dev, "received frame with %u bytes\n", length);
+	}
+}
+
+/**
+ * axienet_fifo_irq - FIFO Isr.
+ * @irq:	irq number
+ * @_ndev:	net_device pointer
+ *
+ * Return: IRQ_HANDLED if device generated a RX interrupt, IRQ_NONE otherwise.
+ *
+ * This is the Axi DMA Rx Isr. It invokes "axienet_recv" to complete the BD
+ * processing.
+ */
+static irqreturn_t __maybe_unused axienet_fifo_irq(int irq, void *ndev)
+{
+	struct axienet_local *lp = netdev_priv(ndev);
+	u32 Pending = XLlFifo_IntPending(&lp->fifo);
+
+	dev_dbg(lp->dev, "got irq %d, pending=%#x\n", irq, Pending);
+
+	while (Pending) {
+		if (Pending & XLLF_INT_RC_MASK) {
+			dev_dbg(lp->dev, "frame received\n");
+			/*
+			 * Receive the frame
+			 */
+			axienet_fifo_receive((struct net_device *)ndev, &lp->fifo);
+			XLlFifo_IntClear(&lp->fifo, XLLF_INT_RC_MASK);
+		}
+		else if (Pending & XLLF_INT_TC_MASK) {
+			dev_dbg(lp->dev, "frame transmitted\n");
+			XLlFifo_IntClear(&lp->fifo, XLLF_INT_TC_MASK);
+		}
+		else if (Pending & XLLF_INT_ERROR_MASK) {
+			dev_dbg(lp->dev, "frame error\n");
+			// FifoErrorHandler(&lp->fifo, Pending);
+			XLlFifo_IntClear(&lp->fifo, XLLF_INT_ERROR_MASK);
+		} else {
+			XLlFifo_IntClear(&lp->fifo, Pending);
+		}
+		Pending = XLlFifo_IntPending(&lp->fifo);
+	}
+
+	return IRQ_HANDLED;
+}
+
 /**
  * axienet_open - Driver open routine.
  * @ndev:	Pointer to net_device structure
@@ -1208,7 +1309,16 @@ static int axienet_open(struct net_device *ndev)
 		else
 			phy_start(phydev);
 	}
-	if (!lp->is_tsn) {
+	if (lp->is_fifo) {
+		ret = request_irq(lp->fifo_irq, axienet_fifo_irq,
+							  0, ndev->name, ndev);
+		if (ret) {
+			dev_err(lp->dev, "unable to get FIFO irq\n");
+			goto err_rx_irq;
+		}
+
+		XLlFifo_IntEnable(&lp->fifo, XLLF_INT_ALL_MASK);
+	} else if (!lp->is_tsn) {
 		/* Enable tasklets for Axi DMA error handling */
 		for_each_rx_dma_queue(lp, i) {
 			tasklet_init(&lp->dma_err_tasklet[i],
@@ -1395,7 +1505,7 @@ static int axienet_stop(struct net_device *ndev)
 	lp->axienet_config->setoptions(ndev, lp->options &
 			   ~(XAE_OPTION_TXEN | XAE_OPTION_RXEN));
 
-	if (!lp->is_tsn) {
+	if (!lp->is_tsn && !lp->is_fifo) {
 		for_each_tx_dma_queue(lp, i) {
 			q = lp->dq[i];
 			cr = axienet_dma_in32(q, XAXIDMA_RX_CR_OFFSET);
@@ -1985,6 +2095,43 @@ static int __maybe_unused axienet_dma_probe(struct platform_device *pdev,
 	return 0;
 }
 
+static int __maybe_unused axienet_fifo_probe(struct platform_device *pdev, struct axienet_local *lp)
+{
+	int ret;
+	struct device_node *np = NULL;
+	struct resource fifo_regs;
+	void *fifo_regs_addr;
+
+	// find AXI FIFO
+	np = of_parse_phandle(pdev->dev.of_node, "axififo-connected", 0);
+	if (!np) {
+		dev_err(&pdev->dev, "missing axififo-connected property\n");
+		return -EINVAL;
+	}
+
+	// get address of MMIO area
+	ret = of_address_to_resource(np, 0, &fifo_regs);
+	if (ret >= 0) {
+		fifo_regs_addr = devm_ioremap_resource(&pdev->dev, &fifo_regs);
+	} else {
+		dev_err(&pdev->dev, "unable to get FIFO resource for %pOF\n", np);
+		return -ENODEV;
+	}
+	dev_info(&pdev->dev, "using fifo_address virt=%#lx phys=%#llx..%#llx\n",
+		(uintptr_t)fifo_regs_addr, fifo_regs.start, fifo_regs.end);
+
+	// get IRQ
+	lp->fifo_irq = of_irq_get(np, 0);
+	dev_info(&pdev->dev, "using fifo_irq %d\n", lp->fifo_irq);
+
+	// initialize FIFO
+	XLlFifo_Initialize(&lp->fifo, (uintptr_t)fifo_regs_addr);
+
+	of_node_put(np);
+
+	return 0;
+}
+
 static int axienet_clk_init(struct platform_device *pdev,
 			    struct clk **axi_aclk, struct clk **axis_clk,
 			    struct clk **ref_clk, struct clk **tmpclk)
@@ -2321,8 +2468,10 @@ static int axienet_probe(struct platform_device *pdev)
 	u32 value;
 	u16 num_queues = XAE_MAX_QUEUES;
 	bool is_tsn = false;
+	bool is_fifo = false;
 
 	is_tsn = of_property_read_bool(pdev->dev.of_node, "xlnx,tsn");
+	is_fifo = of_property_read_bool(pdev->dev.of_node, "xlnx,fifo");
 	ret = of_property_read_u16(pdev->dev.of_node, "xlnx,num-queues",
 				   &num_queues);
 	if (ret) {
@@ -2370,6 +2519,7 @@ static int axienet_probe(struct platform_device *pdev)
 	lp->num_tx_queues = num_queues;
 	lp->num_rx_queues = num_queues;
 	lp->is_tsn = is_tsn;
+	lp->is_fifo = is_fifo;
 	lp->rx_bd_num = RX_BD_NUM_DEFAULT;
 	lp->tx_bd_num = TX_BD_NUM_DEFAULT;
 
@@ -2554,7 +2704,16 @@ static int axienet_probe(struct platform_device *pdev)
 	if (lp->is_tsn)
 		ret = axienet_tsn_probe(pdev, lp, ndev);
 #endif
-	if (!lp->is_tsn) {
+#ifdef CONFIG_XILINX_AXI_FIFO
+	if (lp->is_fifo) {
+		ret = axienet_fifo_probe(pdev, lp);
+		if (ret) {
+			pr_err("Getting FIFO resource failed\n");
+			goto free_netdev;
+		}
+	}
+#endif
+	if (!lp->is_tsn && !lp->is_fifo) {
 		ret = axienet_dma_probe(pdev, ndev);
 		if (ret) {
 			pr_err("Getting DMA resource failed\n");
@@ -2654,7 +2813,7 @@ static int axienet_remove(struct platform_device *pdev)
 	struct axienet_local *lp = netdev_priv(ndev);
 	int i;
 
-	if (!lp->is_tsn) {
+	if (!lp->is_tsn && !lp->is_fifo) {
 		for_each_rx_dma_queue(lp, i)
 			netif_napi_del(&lp->napi[i]);
 	}
