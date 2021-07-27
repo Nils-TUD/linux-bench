@@ -1193,14 +1193,16 @@ static irqreturn_t axienet_eth_irq(int irq, void *_ndev)
 	return IRQ_HANDLED;
 }
 
-static void axienet_fifo_receive(struct net_device *ndev, XLlFifo *Fifo)
+int xaxienet_fifo_receive_napi(struct napi_struct *napi, int quota)
 {
+	struct net_device *ndev = napi->dev;
 	struct axienet_local *lp = netdev_priv(ndev);
 	struct sk_buff *skb;
+	int work_done = 0;
 	u32 length;
 
 	// While there is data in the fifo ...
-	while (XLlFifo_RxOccupancy(Fifo)) {
+	while (work_done < quota && XLlFifo_RxOccupancy(&lp->fifo)) {
 		// allocate socket buffer
 		skb = netdev_alloc_skb(ndev, lp->max_frm_size);
 		if (!skb) {
@@ -1209,22 +1211,30 @@ static void axienet_fifo_receive(struct net_device *ndev, XLlFifo *Fifo)
 		}
 
 		// get packet length
-		length = XLlFifo_RxGetLen(Fifo);
+		length = XLlFifo_RxGetLen(&lp->fifo);
 
 		// read packet from FIFO
-		XLlFifo_Read(Fifo, skb->data, length);
+		XLlFifo_Read(&lp->fifo, skb->data, length);
 
 		skb_put(skb, length);
 		skb->protocol = eth_type_trans(skb, ndev);
 
+		// TODO checksum
 		skb->ip_summed = CHECKSUM_UNNECESSARY;
 		netif_receive_skb(skb);
 
+		dev_dbg(lp->dev, "received frame with %u bytes\n", length);
+
+		// stats
 		ndev->stats.rx_packets += 1;
 		ndev->stats.rx_bytes += length;
-
-		dev_dbg(lp->dev, "received frame with %u bytes\n", length);
+		work_done++;
 	}
+
+	if (work_done < quota)
+		napi_complete(napi);
+
+	return work_done;
 }
 
 /**
@@ -1246,11 +1256,8 @@ static irqreturn_t __maybe_unused axienet_fifo_irq(int irq, void *ndev)
 
 	while (Pending) {
 		if (Pending & XLLF_INT_RC_MASK) {
-			dev_dbg(lp->dev, "frame received\n");
-			/*
-			 * Receive the frame
-			 */
-			axienet_fifo_receive((struct net_device *)ndev, &lp->fifo);
+			dev_dbg(lp->dev, "frame(s) received\n");
+			napi_schedule(&lp->napi[0]);
 			XLlFifo_IntClear(&lp->fifo, XLLF_INT_RC_MASK);
 		}
 		else if (Pending & XLLF_INT_TC_MASK) {
@@ -1316,6 +1323,8 @@ static int axienet_open(struct net_device *ndev)
 			dev_err(lp->dev, "unable to get FIFO irq\n");
 			goto err_rx_irq;
 		}
+
+		napi_enable(&lp->napi[0]);
 
 		XLlFifo_IntEnable(&lp->fifo, XLLF_INT_ALL_MASK);
 	} else if (!lp->is_tsn) {
@@ -1472,8 +1481,12 @@ err_rx_irq:
 		free_irq(q->tx_irq, ndev);
 	}
 err_tx_irq:
-	for_each_rx_dma_queue(lp, i)
-		napi_disable(&lp->napi[i]);
+	if (lp->is_fifo)
+		napi_disable(&lp->napi[0]);
+	else {
+		for_each_rx_dma_queue(lp, i)
+			napi_disable(&lp->napi[i]);
+	}
 	if (phydev)
 		phy_disconnect(phydev);
 	for_each_rx_dma_queue(lp, i)
@@ -1505,6 +1518,8 @@ static int axienet_stop(struct net_device *ndev)
 	lp->axienet_config->setoptions(ndev, lp->options &
 			   ~(XAE_OPTION_TXEN | XAE_OPTION_RXEN));
 
+	if (lp->is_fifo)
+		napi_disable(&lp->napi[0]);
 	if (!lp->is_tsn && !lp->is_fifo) {
 		for_each_tx_dma_queue(lp, i) {
 			q = lp->dq[i];
@@ -2126,6 +2141,9 @@ static int __maybe_unused axienet_fifo_probe(struct platform_device *pdev, struc
 
 	// initialize FIFO
 	XLlFifo_Initialize(&lp->fifo, (uintptr_t)fifo_regs_addr);
+
+	netif_napi_add(lp->ndev, &lp->napi[0], xaxienet_fifo_receive_napi,
+		XAXIENET_NAPI_WEIGHT);
 
 	of_node_put(np);
 
@@ -2813,6 +2831,8 @@ static int axienet_remove(struct platform_device *pdev)
 	struct axienet_local *lp = netdev_priv(ndev);
 	int i;
 
+	if (lp->is_fifo)
+		netif_napi_del(&lp->napi[0]);
 	if (!lp->is_tsn && !lp->is_fifo) {
 		for_each_rx_dma_queue(lp, i)
 			netif_napi_del(&lp->napi[i]);
