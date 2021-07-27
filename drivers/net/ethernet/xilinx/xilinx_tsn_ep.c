@@ -146,12 +146,6 @@ static int tsn_ep_stop(struct net_device *ndev)
 static int tsn_ep_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
 {
 	switch (cmd) {
-#ifdef CONFIG_XILINX_TSN_QBV
-	case SIOCCHIOCTL:
-		return axienet_set_schedule(dev, rq->ifr_data);
-	case SIOC_GET_SCHED:
-		return axienet_get_schedule(dev, rq->ifr_data);
-#endif
 	default:
 		return -EOPNOTSUPP;
 	}
