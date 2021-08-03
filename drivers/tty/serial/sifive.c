@@ -1000,7 +1000,7 @@ static int sifive_serial_probe(struct platform_device *pdev)
 
 	/* Set up clock divider */
 	// ssp->clkin_rate = clk_get_rate(ssp->clk);
-	ssp->clkin_rate = 100000000;
+	ssp->clkin_rate = 80000000;
 	ssp->baud_rate = SIFIVE_DEFAULT_BAUD_RATE;
 	ssp->port.uartclk = ssp->baud_rate * 16;
 	__ssp_update_div(ssp);
