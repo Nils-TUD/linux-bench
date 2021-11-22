@@ -849,6 +849,9 @@ int axienet_queue_xmit(struct sk_buff *skb,
 
 		dev_dbg(&ndev->dev, "queue transmit (num_frag=%u)\n", num_frag);
 
+		if(num_frag != 0)
+			panic("Cannot deal with fragments");
+
 		// do we have space
 		frame_len = skb_headlen(skb);
 		if (XLlFifo_TxVacancy(&lp->fifo) < frame_len)
@@ -856,30 +859,8 @@ int axienet_queue_xmit(struct sk_buff *skb,
 
 		// write into FIFO
 		XLlFifo_Write(&lp->fifo, skb->data, frame_len);
-
-		for (ii = 0; ii < num_frag; ii++) {
-			u32 len;
-			skb_frag_t *frag;
-			void *data;
-
-			frag = &skb_shinfo(skb)->frags[ii];
-			len = skb_frag_size(frag);
-			data = skb_frag_address(frag);
-
-			dev_dbg(&ndev->dev, "writing fragment of len %u @ %#lx\n", len, (uintptr_t)data);
-
-			if (XLlFifo_TxVacancy(&lp->fifo) < len)
-				return NETDEV_TX_BUSY;
-
-			// write into FIFO
-			XLlFifo_Write(&lp->fifo, data, len);
-			frame_len += len;
-		}
-
 		// start transmission
 		XLlFifo_TxSetLen(&lp->fifo, frame_len);
-
-		dev_dbg(&ndev->dev, "transmitted packet of %u bytes\n", frame_len);
 
 		ndev->stats.tx_packets += 1;
 		ndev->stats.tx_bytes += frame_len;
