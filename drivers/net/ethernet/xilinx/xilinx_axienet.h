@@ -663,6 +663,8 @@ struct aximcdma_bd {
 
 #if defined(CONFIG_XILINX_TSN)
 #define XAE_MAX_QUEUES		5
+#elif defined(CONFIG_AXIENET_HAS_MCDMA)
+#define XAE_MAX_QUEUES		16
 #else
 #define XAE_MAX_QUEUES		1
 #endif
@@ -794,6 +796,21 @@ struct axienet_local {
 	u16    num_tc;
 	struct net_device *master; /* master endpoint */
 	struct net_device *slaves[2]; /* two front panel ports */
+#ifdef CONFIG_XILINX_TSN_PTP
+	void *timer_priv;
+	int ptp_tx_irq;
+	int ptp_rx_irq;
+	int rtc_irq;
+	int qbv_irq;
+	int ptp_ts_type;
+	u8  ptp_rx_hw_pointer;
+	u8  ptp_rx_sw_pointer;
+	struct sk_buff_head ptp_txq;
+	struct work_struct tx_tstamp_work;
+#endif
+#ifdef CONFIG_XILINX_TSN_QBV
+	void __iomem *qbv_regs;
+#endif
 #endif
 	spinlock_t ptp_tx_lock;		/* PTP tx lock*/
 	int eth_irq;
@@ -819,6 +836,12 @@ struct axienet_local {
 	bool eth_hasptp;
 	const struct axienet_config *axienet_config;
 
+#if defined(CONFIG_XILINX_AXI_EMAC_HWTSTAMP) || defined(CONFIG_XILINX_TSN_PTP)
+	void __iomem *tx_ts_regs;
+	void __iomem *rx_ts_regs;
+	struct hwtstamp_config tstamp_config;
+	u8 *tx_ptpheader;
+#endif
 	struct clk *aclk;
 	struct clk *eth_sclk;
 	struct clk *eth_refclk;
@@ -1025,6 +1048,62 @@ static inline u32 axienet_get_mrmac_blocklock(struct axienet_local *lp)
 	return axienet_ior(lp, MRMAC_STATRX_BLKLCK_OFFSET);
 }
 
+#ifdef CONFIG_XILINX_AXI_EMAC_HWTSTAMP
+/**
+ * axienet_txts_ior - Memory mapped AXI FIFO MM S register read
+ * @lp:         Pointer to axienet_local structure
+ * @reg:     Address offset from the base address of AXI FIFO MM S
+ *              core
+ *
+ * Return: the contents of the AXI FIFO MM S register
+ */
+
+static inline u32 axienet_txts_ior(struct axienet_local *lp, off_t reg)
+{
+	return ioread32(lp->tx_ts_regs + reg);
+}
+
+/**
+ * axienet_txts_iow - Memory mapper AXI FIFO MM S register write
+ * @lp:         Pointer to axienet_local structure
+ * @reg:     Address offset from the base address of AXI FIFO MM S
+ *              core.
+ * @value:      Value to be written into the AXI FIFO MM S register
+ */
+static inline void axienet_txts_iow(struct  axienet_local *lp, off_t reg,
+				    u32 value)
+{
+	iowrite32(value, (lp->tx_ts_regs + reg));
+}
+
+/**
+ * axienet_rxts_ior - Memory mapped AXI FIFO MM S register read
+ * @lp:         Pointer to axienet_local structure
+ * @reg:     Address offset from the base address of AXI FIFO MM S
+ *              core
+ *
+ * Return: the contents of the AXI FIFO MM S register
+ */
+
+static inline u32 axienet_rxts_ior(struct axienet_local *lp, off_t reg)
+{
+	return ioread32(lp->rx_ts_regs + reg);
+}
+
+/**
+ * axienet_rxts_iow - Memory mapper AXI FIFO MM S register write
+ * @lp:         Pointer to axienet_local structure
+ * @reg:     Address offset from the base address of AXI FIFO MM S
+ *              core.
+ * @value:      Value to be written into the AXI FIFO MM S register
+ */
+static inline void axienet_rxts_iow(struct  axienet_local *lp, off_t reg,
+				    u32 value)
+{
+	iowrite32(value, (lp->rx_ts_regs + reg));
+}
+#endif
+
 /**
  * axienet_dma_in32 - Memory mapped Axi DMA register read
  * @q:		Pointer to DMA queue structure
@@ -1073,6 +1152,36 @@ static inline void axienet_dma_bdout(struct axienet_dma_q *q,
 #endif
 }
 
+#ifdef CONFIG_XILINX_TSN_QBV
+/**
+ * axienet_qbv_ior - Memory mapped TSN QBV register read
+ * @lp:         Pointer to axienet local structure
+ * @offset:     Address offset from the base address of Axi Ethernet core
+ *
+ * Return: The contents of the Axi Ethernet register
+ *
+ * This function returns the contents of the corresponding register.
+ */
+static inline u32 axienet_qbv_ior(struct axienet_local *lp, off_t offset)
+{
+	return ioread32(lp->qbv_regs + offset);
+}
+
+/**
+ * axienet_qbv_iow - Memory mapped TSN QBV register write
+ * @lp:         Pointer to axienet local structure
+ * @offset:     Address offset from the base address of Axi Ethernet core
+ * @value:      Value to be written into the Axi Ethernet register
+ *
+ * This function writes the desired value into the corresponding Axi Ethernet
+ * register.
+ */
+static inline void axienet_qbv_iow(struct axienet_local *lp, off_t offset,
+				   u32 value)
+{
+	iowrite32(value, (lp->qbv_regs + offset));
+}
+#endif
 
 /* Function prototypes visible in xilinx_axienet_mdio.c for other files */
 int axienet_mdio_enable(struct axienet_local *lp);
@@ -1087,12 +1196,27 @@ int axienet_tsn_probe(struct platform_device *pdev,
 		      struct net_device *ndev);
 int axienet_tsn_xmit(struct sk_buff *skb, struct net_device *ndev);
 #endif
+#ifdef CONFIG_XILINX_TSN_PTP
+void *axienet_ptp_timer_probe(void __iomem *base, struct platform_device *pdev);
+void axienet_tx_tstamp(struct work_struct *work);
+int axienet_ptp_timer_remove(void *priv);
+#endif
+#ifdef CONFIG_XILINX_TSN_QBV
+int axienet_qbv_init(struct net_device *ndev);
+void axienet_qbv_remove(struct net_device *ndev);
+int axienet_set_schedule(struct net_device *ndev, void __user *useraddr);
+int axienet_get_schedule(struct net_device *ndev, void __user *useraddr);
+#endif
 
 #ifdef CONFIG_XILINX_TSN_QBR
 int axienet_preemption(struct net_device *ndev, void __user *useraddr);
 int axienet_preemption_ctrl(struct net_device *ndev, void __user *useraddr);
 int axienet_preemption_sts(struct net_device *ndev, void __user *useraddr);
 int axienet_preemption_cnt(struct net_device *ndev, void __user *useraddr);
+#ifdef CONFIG_XILINX_TSN_QBV
+int axienet_qbu_user_override(struct net_device *ndev, void __user *useraddr);
+int axienet_qbu_sts(struct net_device *ndev, void __user *useraddr);
+#endif
 #endif
 
 int axienet_mdio_wait_until_ready(struct axienet_local *lp);
@@ -1113,7 +1237,39 @@ void axienet_setoptions(struct net_device *ndev, u32 options);
 int axienet_queue_xmit(struct sk_buff *skb, struct net_device *ndev,
 		       u16 map);
 
+#if defined(CONFIG_AXIENET_HAS_MCDMA)
+int __maybe_unused axienet_mcdma_rx_q_init(struct net_device *ndev,
+					   struct axienet_dma_q *q);
+int __maybe_unused axienet_mcdma_tx_q_init(struct net_device *ndev,
+					   struct axienet_dma_q *q);
+void __maybe_unused axienet_mcdma_tx_bd_free(struct net_device *ndev,
+					     struct axienet_dma_q *q);
+void __maybe_unused axienet_mcdma_rx_bd_free(struct net_device *ndev,
+					     struct axienet_dma_q *q);
+irqreturn_t __maybe_unused axienet_mcdma_tx_irq(int irq, void *_ndev);
+irqreturn_t __maybe_unused axienet_mcdma_rx_irq(int irq, void *_ndev);
+void __maybe_unused axienet_mcdma_err_handler(unsigned long data);
+void axienet_strings(struct net_device *ndev, u32 sset, u8 *data);
+int axienet_sset_count(struct net_device *ndev, int sset);
+void axienet_get_stats(struct net_device *ndev,
+		       struct ethtool_stats *stats,
+		       u64 *data);
+int axeinet_mcdma_create_sysfs(struct kobject *kobj);
+void axeinet_mcdma_remove_sysfs(struct kobject *kobj);
+int __maybe_unused axienet_mcdma_tx_probe(struct platform_device *pdev,
+					  struct device_node *np,
+					  struct axienet_local *lp);
+int __maybe_unused axienet_mcdma_rx_probe(struct platform_device *pdev,
+					  struct axienet_local *lp,
+					  struct net_device *ndev);
+#endif
+
+#ifdef CONFIG_AXIENET_HAS_MCDMA
+void axienet_tx_hwtstamp(struct axienet_local *lp,
+			 struct aximcdma_bd *cur_p);
+#else
 void axienet_tx_hwtstamp(struct axienet_local *lp,
 			 struct axidma_bd *cur_p);
+#endif
 
 #endif /* XILINX_AXI_ENET_H */

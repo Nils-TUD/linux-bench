@@ -29,6 +29,11 @@
 
 #include "xilinx_axienet.h"
 
+#ifdef CONFIG_XILINX_TSN_PTP
+#include "xilinx_tsn_ptp.h"
+#include "xilinx_tsn_timer.h"
+#endif
+
 #define TSN_TX_BE_QUEUE  0
 #define TSN_TX_RES_QUEUE 1
 #define TSN_TX_ST_QUEUE  2
@@ -90,6 +95,11 @@ int axienet_tsn_xmit(struct sk_buff *skb, struct net_device *ndev)
 	u16 ether_type = ntohs(hdr->h_proto);
 	struct net_device *master = lp->master;
 
+#ifdef CONFIG_XILINX_TSN_PTP
+	/* check if skb is a PTP frame ? */
+	if (unlikely(ether_type == ETH_P_1588))
+		return axienet_ptp_xmit(skb, ndev);
+#endif
 	/* use EP to xmit non-PTP frames */
 	skb->dev = master;
 	dev_queue_xmit(skb);
@@ -156,6 +166,28 @@ int axienet_tsn_probe(struct platform_device *pdev,
 	ep_node = of_parse_phandle(pdev->dev.of_node, "tsn,endpoint", 0);
 
 	lp->master = of_find_net_device_by_node(ep_node);
+#ifdef CONFIG_XILINX_TSN_QBV
+	lp->qbv_regs = 0;
+	abl_reg = axienet_ior(lp, XAE_TSN_ABL_OFFSET);
+	if (!(abl_reg & TSN_BRIDGEEP_EPONLY)) {
+		if (of_property_read_u32(pdev->dev.of_node,
+					 "xlnx,qbv-addr", &qbv_addr) == 0) {
+			if ((of_property_read_u32(pdev->dev.of_node,
+						  "xlnx,qbv-size", &qbv_size) ==
+			     0) && qbv_size) {
+				lp->qbv_regs = devm_ioremap(&pdev->dev,
+							    qbv_addr, qbv_size);
+				if (IS_ERR(lp->qbv_regs)) {
+					dev_err(&pdev->dev,
+						"ioremap failed for the qbv\n");
+					ret = PTR_ERR(lp->qbv_regs);
+					return ret;
+				}
+				ret = axienet_qbv_init(ndev);
+			}
+		}
+	}
+#endif
 	/* EP+Switch */
 	/* store the slaves to master(ep) */
 	ep_lp = netdev_priv(lp->master);
