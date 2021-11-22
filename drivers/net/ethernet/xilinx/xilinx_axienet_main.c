@@ -851,8 +851,7 @@ int axienet_queue_xmit(struct sk_buff *skb,
 
 		// do we have space
 		frame_len = skb_headlen(skb);
-		unsigned int available = XLlFifo_TxVacancy(&lp->fifo) * 4;
-		if (available < frame_len)
+		if (XLlFifo_TxVacancy(&lp->fifo) < frame_len)
 			return NETDEV_TX_BUSY;
 
 		// write into FIFO
@@ -869,7 +868,7 @@ int axienet_queue_xmit(struct sk_buff *skb,
 
 			dev_dbg(&ndev->dev, "writing fragment of len %u @ %#lx\n", len, (uintptr_t)data);
 
-			if (XLlFifo_TxVacancy(&lp->fifo) * 4 < len)
+			if (XLlFifo_TxVacancy(&lp->fifo) < len)
 				return NETDEV_TX_BUSY;
 
 			// write into FIFO
