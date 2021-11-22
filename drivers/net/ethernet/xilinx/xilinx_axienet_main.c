@@ -880,9 +880,6 @@ int axienet_queue_xmit(struct sk_buff *skb,
 		// start transmission
 		XLlFifo_TxSetLen(&lp->fifo, frame_len);
 
-		// we are done with the socket buffer
-		dev_kfree_skb_irq(skb);
-
 		dev_dbg(&ndev->dev, "transmitted packet of %u bytes\n", frame_len);
 
 		ndev->stats.tx_packets += 1;
