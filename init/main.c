@@ -113,7 +113,6 @@ static int kernel_init(void *);
 
 extern void init_IRQ(void);
 extern void radix_tree_init(void);
-extern void tcu_init(void);
 
 /*
  * Debug helper: via this flag we know that we are in 'early bootup code'
@@ -1058,7 +1057,6 @@ asmlinkage __visible void __init __no_sanitize_address start_kernel(void)
 	sfi_init_late();
 	kcsan_init();
 
-	tcu_init();
 	/* Do the rest non-__init'ed, we're now alive */
 	arch_call_rest_init();
 
