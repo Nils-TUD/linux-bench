@@ -73,7 +73,7 @@ static long int tcu_ioctl(struct file *f, unsigned int cmd, unsigned long arg) {
 			if (copy_from_user(&d, (xlate_fault_arg_t*)arg, sizeof(xlate_fault_arg_t))) {
 				return -EACCES;
 			}
-            pr_info("received ioctl xlate fault call; virt: %#llx, phys: %#llx, perm: %#x, asid: %#hx\n", d.virt, d.phys, d.perm, d.asid);
+            // pr_info("received ioctl xlate fault call; virt: %#llx, phys: %#llx, perm: %#x, asid: %#hx\n", d.virt, d.phys, d.perm, d.asid);
             insert_tlb(d);
             break;
         default:
@@ -120,7 +120,7 @@ static int tcu_dev_mmap(struct file *file, struct vm_area_struct *vma) {
 	size_t size = vma->vm_end - vma->vm_start;
     // physical address of the mmio area
 	phys_addr_t offset = (phys_addr_t)vma->vm_pgoff << PAGE_SHIFT;
-    pr_info("tcu mmap - start: %#lx, end: %#lx, size: %#lx, offset: %#llx\n", vma->vm_start, vma->vm_end, size, offset);
+    // pr_info("tcu mmap - start: %#lx, end: %#lx, size: %#lx, offset: %#llx\n", vma->vm_start, vma->vm_end, size, offset);
 
 	/* Does it even fit in phys_addr_t? */
 	if (offset >> PAGE_SHIFT != vma->vm_pgoff) {
@@ -160,7 +160,7 @@ static int msg_dev_mmap(struct file *file, struct vm_area_struct *vma) {
 	size_t size = vma->vm_end - vma->vm_start;
     // physical address of the mmio area
 	phys_addr_t offset = (phys_addr_t)vma->vm_pgoff << PAGE_SHIFT;
-    pr_info("tcu msg mmap - start: %#lx, end: %#lx, size: %#lx, offset: %#llx\n", vma->vm_start, vma->vm_end, size, offset);
+    // pr_info("tcu msg mmap - start: %#lx, end: %#lx, size: %#lx, offset: %#llx\n", vma->vm_start, vma->vm_end, size, offset);
 
 	/* Does it even fit in phys_addr_t? */
 	if (offset >> PAGE_SHIFT != vma->vm_pgoff) {
