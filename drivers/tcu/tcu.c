@@ -13,6 +13,10 @@
 // ioremap, iounmap, ioread, iowrite
 #include <linux/io.h>
 
+#define READ_PERM 0x1
+
+// buffer for side calls to the m3 kernel
+static uint8_t msg_buf[MAX_MSG_SIZE];
 
 typedef struct {
     uint64_t virt;
@@ -30,7 +34,6 @@ static long int tcu_ioctl(struct file *f, unsigned int cmd, unsigned long arg) {
 			if (copy_from_user(&d, (xlate_fault_arg_t*)arg, sizeof(xlate_fault_arg_t))) {
 				return -EACCES;
 			}
-            // pr_info("received ioctl xlate fault call; virt: %#llx, phys: %#llx, perm: %#x, asid: %#hx\n", d.virt, d.phys, d.perm, d.asid);
             insert_tlb(d.asid, d.virt, d.phys, d.perm);
             break;
         default:
@@ -43,6 +46,7 @@ static long int tcu_ioctl(struct file *f, unsigned int cmd, unsigned long arg) {
 #error "__HAVE_PHYS_MEM_ACCESS_PROT is defined"
 #endif
 
+// TODO: is this necessary?
 #ifdef pgprot_noncached
 static int uncached_access(struct file *file, phys_addr_t addr)
 {
@@ -52,6 +56,7 @@ static int uncached_access(struct file *file, phys_addr_t addr)
 }
 #endif
 
+// TODO: is this necessary?
 static pgprot_t phys_mem_access_prot(struct file *file, unsigned long pfn,
 				     unsigned long size, pgprot_t vma_prot)
 {
@@ -64,20 +69,17 @@ static pgprot_t phys_mem_access_prot(struct file *file, unsigned long pfn,
 	return vma_prot;
 }
 
+// TODO: is this necessary?
 static const struct vm_operations_struct mmap_mem_ops = {
 #ifdef CONFIG_HAVE_IOREMAP_PROT
 	.access = generic_access_phys
 #endif
 };
 
-#define MMIO_ADDR 0xf0000000
-#define MMIO_SIZE (2 * PAGE_SIZE)
-
 static int tcu_dev_mmap(struct file *file, struct vm_area_struct *vma) {
 	size_t size = vma->vm_end - vma->vm_start;
     // physical address of the mmio area
 	phys_addr_t offset = (phys_addr_t)vma->vm_pgoff << PAGE_SHIFT;
-    // pr_info("tcu mmap - start: %#lx, end: %#lx, size: %#lx, offset: %#llx\n", vma->vm_start, vma->vm_end, size, offset);
 
 	/* Does it even fit in phys_addr_t? */
 	if (offset >> PAGE_SHIFT != vma->vm_pgoff) {
@@ -125,7 +127,7 @@ static struct file_operations fops = {
     .unlocked_ioctl = tcu_ioctl,
 };
 
-static int __init tcu_init(void) {
+static dev_t create_tcu_dev(void) {
     int retval;
     struct device *tcu_device;
     dev_t dev = 0;
@@ -157,7 +159,18 @@ static int __init tcu_init(void) {
         class_destroy(dev_class);
         return -1;
     }
-    priv_base = (uint64_t*)ioremap(MMIO_PRIV_ADDR, MMIO_PRIV_SIZE);
+    return dev;
+}
+
+static int __init tcu_init(void) {
+    dev_t dev;
+    unsigned long msg_buf_phys_addr;
+    pr_info("tcu ioctl xlate fault magic number: %#lx\n", IOCTL_XLATE_FAULT);
+    dev = create_tcu_dev();
+    if (dev == (dev_t)-1) {
+        return -1;
+    }
+    priv_base = (uint64_t*)ioremap(MMIO_ADDR, MMIO_SIZE);
     if (!priv_base) {
         dev_t tcu_dev = MKDEV(major, TCU_MINOR);
         pr_err("failed to ioremap the private tcu mmio interface\n");
@@ -166,7 +179,9 @@ static int __init tcu_init(void) {
         class_destroy(dev_class);
         return -1;
     }
-    pr_info("ioctl xlate fault magic number: %#lx\n", IOCTL_XLATE_FAULT);
+    unpriv_base = priv_base + MMIO_UNPRIV_SIZE;
+    msg_buf_phys_addr = virt_to_phys(msg_buf);
+    insert_tlb(0xffff, (uint64_t)msg_buf, msg_buf_phys_addr, READ_PERM);
 
     return 0;
 }
