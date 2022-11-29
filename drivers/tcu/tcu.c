@@ -25,17 +25,22 @@ typedef struct {
 
 #define IOCTL_XLATE_FAULT _IOW('q', 1, xlate_fault_arg_t*)
 
+// PrivReg
 #define PRIV_CMD     0x1
 #define PRIV_CMD_ARG 0x2
 
+// PrivCmdOpCode
 #define IDLE         0x0
 #define INS_TLB      0x3
+#define XCHG_ACT     0x4
 
 static void write_priv_reg(unsigned int index, uint64_t val) {
+    BUG_ON(priv_base == NULL);
     iowrite64(val, priv_base + index);
 }
 
 static uint64_t read_priv_reg(unsigned int index) {
+    BUG_ON(priv_base == NULL);
     return ioread64(priv_base + index);
 }
 
@@ -64,6 +69,14 @@ static void insert_tlb(xlate_fault_arg_t arg) {
     if (check_priv_error()) {
         pr_err("failed to insert tlb entry\n");
     }
+}
+
+static uint64_t xchg_activity(uint64_t actid) {
+    write_priv_reg(PRIV_CMD, (actid << 9) | XCHG_ACT);
+    if (check_priv_error()) {
+        pr_err("failed to exchange activities\n");
+    }
+    return read_priv_reg(PRIV_CMD_ARG);
 }
 
 static long int tcu_ioctl(struct file *f, unsigned int cmd, unsigned long arg) {
