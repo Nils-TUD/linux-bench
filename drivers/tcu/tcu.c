@@ -1,13 +1,14 @@
 
+// module_init, module_exit
 #include <linux/module.h>
-#include <linux/init.h>
-#include <linux/kernel.h>
-#include <linux/fs.h>
+
+// mmap_mem_ops
 #include <linux/mm.h>
-#include <linux/device.h>
-#include <linux/kdev_t.h>
+
+// cdev_add, cdev_init, cdev
 #include <linux/cdev.h>
-#include <linux/ioctl.h>
+
+// ioremap, iounmap, ioread, iowrite
 #include <linux/io.h>
 
 #define MMIO_PRIV_ADDR 0xf0002000
@@ -169,89 +170,21 @@ static int tcu_dev_mmap(struct file *file, struct vm_area_struct *vma) {
 	return 0;
 }
 
-static int msg_dev_mmap(struct file *file, struct vm_area_struct *vma) {
-	size_t size = vma->vm_end - vma->vm_start;
-    // physical address of the mmio area
-	phys_addr_t offset = (phys_addr_t)vma->vm_pgoff << PAGE_SHIFT;
-    // pr_info("tcu msg mmap - start: %#lx, end: %#lx, size: %#lx, offset: %#llx\n", vma->vm_start, vma->vm_end, size, offset);
-
-	/* Does it even fit in phys_addr_t? */
-	if (offset >> PAGE_SHIFT != vma->vm_pgoff) {
-		return -EINVAL;
-    }
-
-	/* It's illegal to wrap around the end of the physical address space. */
-	if (offset + (phys_addr_t)size - 1 < offset) {
-		return -EINVAL;
-    }
-
-    /*
-    unsigned long mmio_end = MMIO_ADDR + MMIO_SIZE;
-    if ((vma->vm_start <= MMIO_ADDR && vma->vm_end >= MMIO_ADDR)
-     || (vma->vm_start <= mmio_end && vma->vm_end >= mmio_end)) {
-        pr_err("tcu msg mmap invalid area\n");
-        return -EINVAL;
-    }
-    */
-
-	vma->vm_page_prot = phys_mem_access_prot(file, vma->vm_pgoff,
-						 size,
-						 vma->vm_page_prot);
-
-	vma->vm_ops = &mmap_mem_ops;
-
-	/* Remap-pfn-range will mark the range VM_IO */
-	if (remap_pfn_range(vma,
-			    vma->vm_start,
-			    vma->vm_pgoff,
-			    size,
-			    vma->vm_page_prot)) {
-		return -EAGAIN;
-	}
-	return 0;
-}
-
-// one device for tcu mmio area mapping and one for the message buffer
-// (which needs virtual addresses < 0x1_0000_0000)
-#define DEV_COUNT 2
+#define DEV_COUNT 1
 #define TCU_MINOR 0
-#define MSG_MINOR 1
 unsigned int major = 0;
 static struct cdev cdev;
 static struct class *dev_class;
 
-static struct file_operations tcu_dev_fops = {
+static struct file_operations fops = {
     .owner = THIS_MODULE,
     .mmap = tcu_dev_mmap,
     .unlocked_ioctl = tcu_ioctl,
 };
 
-static struct file_operations msg_dev_fops = {
-    .owner = THIS_MODULE,
-    .mmap = msg_dev_mmap,
-};
-
-static int open(struct inode *inode, struct file *filp) {
-    int minor;
-
-    minor = iminor(inode);
-    if (minor == TCU_MINOR) {
-        filp->f_op = &tcu_dev_fops;
-    } else if (minor == MSG_MINOR) {
-        filp->f_op = &msg_dev_fops;
-    }
-    return 0;
-}
-
-static struct file_operations fops = {
-    .owner = THIS_MODULE,
-    .open = open,
-};
-
 static int __init tcu_init(void) {
     int retval;
     struct device *tcu_device;
-    struct device *msg_device;
     dev_t dev = 0;
 
     pr_info("tcu driver init\n");
@@ -281,20 +214,11 @@ static int __init tcu_init(void) {
         class_destroy(dev_class);
         return -1;
     }
-    msg_device = device_create(dev_class,  NULL, MKDEV(major, MSG_MINOR), NULL, "tcumsg");
-    if (IS_ERR(msg_device)) {
-        pr_err("failed to create tcu msg device\n");
-        device_destroy(dev_class, dev);
-        unregister_chrdev_region(dev, DEV_COUNT);
-        class_destroy(dev_class);
-    }
     priv_base = (uint64_t*)ioremap(MMIO_PRIV_ADDR, MMIO_PRIV_SIZE);
     if (!priv_base) {
         dev_t tcu_dev = MKDEV(major, TCU_MINOR);
-        dev_t msg_dev = MKDEV(major, MSG_MINOR);
         pr_err("failed to ioremap the private tcu mmio interface\n");
         device_destroy(dev_class, tcu_dev);
-        device_destroy(dev_class, msg_dev);
         unregister_chrdev_region(dev, DEV_COUNT);
         class_destroy(dev_class);
         return -1;
@@ -306,10 +230,8 @@ static int __init tcu_init(void) {
 
 static void __exit tcu_exit(void) {
     dev_t tcu_dev = MKDEV(major, TCU_MINOR);
-    dev_t msg_dev = MKDEV(major, MSG_MINOR);
     iounmap((void*)priv_base);
     device_destroy(dev_class, tcu_dev);
-    device_destroy(dev_class, msg_dev);
     class_destroy(dev_class);
     unregister_chrdev_region(tcu_dev, DEV_COUNT);
     pr_info("removed tcu driver");
