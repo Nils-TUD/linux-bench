@@ -1,4 +1,6 @@
 
+#include "tculib.h"
+
 // module_init, module_exit
 #include <linux/module.h>
 
@@ -11,11 +13,6 @@
 // ioremap, iounmap, ioread, iowrite
 #include <linux/io.h>
 
-#define MMIO_PRIV_ADDR 0xf0002000
-#define MMIO_PRIV_SIZE (2 * PAGE_SIZE)
-
-// start address of the private tcu mmio region (is mapped to MMIO_PRIV_ADDR)
-static uint64_t* priv_base = NULL;
 
 typedef struct {
     uint64_t virt;
@@ -26,60 +23,6 @@ typedef struct {
 
 #define IOCTL_XLATE_FAULT _IOW('q', 1, xlate_fault_arg_t*)
 
-// PrivReg
-#define PRIV_CMD     0x1
-#define PRIV_CMD_ARG 0x2
-
-// PrivCmdOpCode
-#define IDLE         0x0
-#define INS_TLB      0x3
-#define XCHG_ACT     0x4
-
-static void write_priv_reg(unsigned int index, uint64_t val) {
-    BUG_ON(priv_base == NULL);
-    iowrite64(val, priv_base + index);
-}
-
-static uint64_t read_priv_reg(unsigned int index) {
-    BUG_ON(priv_base == NULL);
-    return ioread64(priv_base + index);
-}
-
-static bool check_priv_error(void) {
-    uint64_t cmd;
-    while (true) {
-        cmd = read_priv_reg(PRIV_CMD);
-        if ((cmd & 0xf) == IDLE) {
-            if (((cmd >> 4) & 0xf) != 0) {
-                return true; // error
-            }
-            return false; // success
-        }
-    }
-}
-
-static void insert_tlb(xlate_fault_arg_t arg) {
-    uint64_t cmd;
-    write_priv_reg(PRIV_CMD_ARG, arg.phys);
-    // TODO: fence
-    cmd = ((uint64_t)arg.asid) << 41
-        | ((arg.virt & PAGE_MASK) << 9)
-        | (arg.perm << 9)
-        | INS_TLB;
-    write_priv_reg(PRIV_CMD, cmd);
-    if (check_priv_error()) {
-        pr_err("failed to insert tlb entry\n");
-    }
-}
-
-static uint64_t xchg_activity(uint64_t actid) {
-    write_priv_reg(PRIV_CMD, (actid << 9) | XCHG_ACT);
-    if (check_priv_error()) {
-        pr_err("failed to exchange activities\n");
-    }
-    return read_priv_reg(PRIV_CMD_ARG);
-}
-
 static long int tcu_ioctl(struct file *f, unsigned int cmd, unsigned long arg) {
     xlate_fault_arg_t d;
     switch (cmd) {
@@ -88,7 +31,7 @@ static long int tcu_ioctl(struct file *f, unsigned int cmd, unsigned long arg) {
 				return -EACCES;
 			}
             // pr_info("received ioctl xlate fault call; virt: %#llx, phys: %#llx, perm: %#x, asid: %#hx\n", d.virt, d.phys, d.perm, d.asid);
-            insert_tlb(d);
+            insert_tlb(d.asid, d.virt, d.phys, d.perm);
             break;
         default:
 			return -EINVAL;
