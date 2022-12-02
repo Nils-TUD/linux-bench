@@ -1,6 +1,5 @@
 
 #include "tculib.h"
-#include "sidecalls.h"
 
 // module_init, module_exit
 #include <linux/module.h>
@@ -11,61 +10,80 @@
 // cdev_add, cdev_init, cdev
 #include <linux/cdev.h>
 
-// ioremap, iounmap, ioread, iowrite
+// ioremap, iounmap
 #include <linux/io.h>
 
-// address of receive buffer (see src/arch/kachel/cfg.rs, TILEMUX_RBUF_SPACE in base lib)
-#define RCV_BUF_ADDR 0x103ff000
-
+// tilemux activity id
+#define TMAID 0xffff
+#define INVAL_AID 0xfffe
+// read permission for tlb entry
 #define READ_PERM 0x1
 
 typedef struct {
-	uint64_t virt;
-	uint64_t phys;
-	uint32_t perm;
-	uint16_t asid;
-} xlate_fault_arg_t;
+	// current activity id
+	// set to TMAID or aid depending on whether we are in tilemux mode or user mode
+	ActId cur_aid;
+	// set to activity id as soon as we register an activity
+	ActId aid;
+} state_t;
+
+static state_t state = { .cur_aid = TMAID, .aid = INVAL_AID };
 
 typedef struct {
-	uint16_t actid; // out
-	uint16_t error; // out
-} register_act_t;
+	uint64_t phys;
+	uint32_t virt;
+} tlb_insert_t;
 
-#define IOCTL_XLATE_FAULT _IOW('q', 1, xlate_fault_arg_t *)
-#define IOCTL_REGISTER_ACT _IOWR('q', 2, register_act_t *)
+// register an activity, sets the act id in the state
+#define IOCTL_RGSTR_ACT _IOW('q', 1, ActId *)
+// goes to tilemux mode by setting the act tcu register
+#define IOCTL_TO_TMX_MD _IO('q', 2)
+// goes to user mode by setting the act tcu register
+#define IOCTL_TO_USR_MD _IO('q', 3)
+// inserts an entry in tcu tlb, uses current activity id
+#define IOCTL_TLB_INSRT _IOW('q', 4, tlb_insert_t *)
 
-static void register_act(register_act_t *r)
+bool in_tmmode(void)
 {
-	BUG_ON(r == NULL);
-	r->error = send_receive_lx_act(&r->actid);
-	if (r->error) {
-		return;
-	}
-	r->error = xchg_activity((Reg)r->actid);
+	return state.cur_aid == TMAID;
+}
+
+Error set_act_tcu(void)
+{
+	return xchg_activity(state.cur_aid);
 }
 
 static long int tcu_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
 {
-	xlate_fault_arg_t d;
-	register_act_t r;
+	tlb_insert_t ti;
 	switch (cmd) {
-	case IOCTL_XLATE_FAULT:
-		if (copy_from_user(&d, (xlate_fault_arg_t *)arg,
-				   sizeof(xlate_fault_arg_t))) {
+	case IOCTL_RGSTR_ACT:
+		if (copy_from_user(&state.aid, (ActId *)arg, sizeof(ActId))) {
 			return -EACCES;
 		}
-		insert_tlb(d.asid, d.virt, d.phys, d.perm);
 		break;
-	case IOCTL_REGISTER_ACT:
-		if (copy_from_user(&r, (register_act_t *)arg,
-				   sizeof(register_act_t))) {
+	case IOCTL_TO_TMX_MD:
+		if (in_tmmode()) {
+			return -EINVAL;
+		}
+		state.cur_aid = TMAID;
+		return (int)set_act_tcu();
+	case IOCTL_TO_USR_MD:
+		if (!in_tmmode()) {
+			return -EINVAL;
+		}
+		if (state.aid == INVAL_AID) {
+			return -EPERM;
+		}
+		state.cur_aid = state.aid;
+		return (int)set_act_tcu();
+	case IOCTL_TLB_INSRT:
+		if (copy_from_user(&ti, (tlb_insert_t *)arg,
+				   sizeof(tlb_insert_t))) {
 			return -EACCES;
 		}
-		register_act(&r);
-		if (copy_to_user((register_act_t *)arg, &r,
-				 sizeof(register_act_t))) {
-			return -EACCES;
-		}
+		return (int)insert_tlb(state.cur_aid, ti.virt, ti.phys,
+				       READ_PERM);
 		break;
 	default:
 		return -EINVAL;
@@ -124,8 +142,8 @@ static int tcu_dev_mmap(struct file *file, struct vm_area_struct *vma)
 	}
 
 	/* We only want to support mapping the tcu mmio area */
-	if (offset != MMIO_ADDR || size != MMIO_UNPRIV_SIZE) {
-		pr_err("tcu mmap invalid area\n");
+	if (offset != MMIO_UNPRIV_ADDR || size != MMIO_UNPRIV_SIZE) {
+		pr_err("tcu mmap invalid area");
 		return -EINVAL;
 	}
 
@@ -163,27 +181,27 @@ static dev_t create_tcu_dev(void)
 
 	retval = alloc_chrdev_region(&dev, TCU_MINOR, DEV_COUNT, "tcu");
 	if (retval < 0) {
-		pr_err("failed to allocate major number for tcu device\n");
+		pr_err("failed to allocate major number for tcu device");
 		return -1;
 	}
 	major = MAJOR(dev);
 	cdev_init(&cdev, &fops);
 	retval = cdev_add(&cdev, dev, DEV_COUNT);
 	if (retval < 0) {
-		pr_err("failed to add tcu device\n");
+		pr_err("failed to add tcu device");
 		unregister_chrdev_region(dev, DEV_COUNT);
 		return -1;
 	}
 	dev_class = class_create(THIS_MODULE, "tcu");
 	if (IS_ERR(dev_class)) {
-		pr_err("failed to create device class for tcu device\n");
+		pr_err("failed to create device class for tcu device");
 		unregister_chrdev_region(dev, DEV_COUNT);
 		return -1;
 	}
 	tcu_device = device_create(dev_class, NULL, MKDEV(major, TCU_MINOR),
 				   NULL, "tcu");
 	if (IS_ERR(tcu_device)) {
-		pr_err("failed to create tcu device\n");
+		pr_err("failed to create tcu device");
 		unregister_chrdev_region(dev, DEV_COUNT);
 		class_destroy(dev_class);
 		return -1;
@@ -191,60 +209,26 @@ static dev_t create_tcu_dev(void)
 	return dev;
 }
 
-void map_page(unsigned long virt, phys_addr_t phys)
-{
-	spinlock_t* ptl;
-	struct page* page;
-	pte_t* pte;
-	page = virt_to_page(virt);
-	pte = get_locked_pte(&init_mm, phys, &ptl);
-	set_pte_at(&init_mm, phys, pte, mk_pte(page, __pgprot(VM_READ | VM_WRITE)));
-	spin_unlock(ptl);
-	flush_tlb_all();
-}
-
 static int __init tcu_init(void)
 {
 	dev_t dev;
-	unsigned long msg_buf_phys_addr;
-	pr_info("tcu ioctl xlate fault magic number: %#lx\n",
-		IOCTL_XLATE_FAULT);
-	pr_info("tcu ioctl register act magic number: %#lx\n",
-		IOCTL_REGISTER_ACT);
-
-	unsigned long virt = 0xfffff000;
-	map_page(virt, 0x3fdff000);
-	msg_buf = virt;
-
 	dev = create_tcu_dev();
 	if (dev == (dev_t)-1) {
 		return -1;
 	}
-	unpriv_base = (uint64_t *)ioremap(MMIO_ADDR, MMIO_SIZE);
-	if (!unpriv_base) {
+	priv_base = (uint64_t *)ioremap(MMIO_PRIV_ADDR, MMIO_PRIV_SIZE);
+	if (!priv_base) {
 		dev_t tcu_dev = MKDEV(major, TCU_MINOR);
-		pr_err("failed to ioremap the private tcu mmio interface\n");
+		pr_err("failed to ioremap the private tcu mmio interface");
 		device_destroy(dev_class, tcu_dev);
 		unregister_chrdev_region(dev, DEV_COUNT);
 		class_destroy(dev_class);
 		return -1;
 	}
-	pr_info("ioremap was successful, unpriv_base: 0x%px", unpriv_base);
-	priv_base = unpriv_base + MMIO_UNPRIV_SIZE / sizeof(Reg);
-	// msg_buf_phys_addr = virt_to_phys(msg_buf);
-	// insert_tlb(0xffff, (uint64_t)msg_buf, 0x3fdff000, READ_PERM);
-	insert_tlb(0xffff, (uint64_t)msg_buf, 0x3fdff000, READ_PERM);
-
-	rcv_buf = (uint8_t *)ioremap(RCV_BUF_ADDR, MAX_MSG_SIZE);
-	if (!rcv_buf) {
-		dev_t tcu_dev = MKDEV(major, TCU_MINOR);
-		iounmap((void *)unpriv_base);
-		pr_err("failed to ioremap the private tcu mmio interface\n");
-		device_destroy(dev_class, tcu_dev);
-		unregister_chrdev_region(dev, DEV_COUNT);
-		class_destroy(dev_class);
-		return -1;
-	}
+	pr_info("tcu ioctl register act: %#lx", IOCTL_RGSTR_ACT);
+	pr_info("tcu ioctl to tilemux mode: %#x", IOCTL_TO_TMX_MD);
+	pr_info("tcu ioctl to user mode: %#x", IOCTL_TO_USR_MD);
+	pr_info("tcu ioctl tlb insert: %#lx", IOCTL_TLB_INSRT);
 
 	return 0;
 }
@@ -252,8 +236,7 @@ static int __init tcu_init(void)
 static void __exit tcu_exit(void)
 {
 	dev_t tcu_dev = MKDEV(major, TCU_MINOR);
-	iounmap((void *)unpriv_base);
-	iounmap((void *)rcv_buf);
+	iounmap((void *)priv_base);
 	device_destroy(dev_class, tcu_dev);
 	class_destroy(dev_class);
 	unregister_chrdev_region(tcu_dev, DEV_COUNT);
