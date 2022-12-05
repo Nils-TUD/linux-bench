@@ -42,6 +42,8 @@ typedef struct {
 #define IOCTL_TO_USR_MD _IO('q', 3)
 // inserts an entry in tcu tlb, uses current activity id
 #define IOCTL_TLB_INSRT _IOW('q', 4, tlb_insert_t *)
+// forgets about an activity
+#define IOCTL_UNREG_ACT _IO('q', 5)
 
 bool in_tmmode(void)
 {
@@ -64,13 +66,13 @@ static long int tcu_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
 		break;
 	case IOCTL_TO_TMX_MD:
 		if (in_tmmode()) {
-			return -EINVAL;
+			return 0;
 		}
 		state.cur_aid = TMAID;
 		return (int)set_act_tcu();
 	case IOCTL_TO_USR_MD:
 		if (!in_tmmode()) {
-			return -EINVAL;
+			return 0;
 		}
 		if (state.aid == INVAL_AID) {
 			return -EPERM;
@@ -85,6 +87,10 @@ static long int tcu_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
 		return (int)insert_tlb(state.cur_aid, ti.virt, ti.phys,
 				       READ_PERM);
 		break;
+	case IOCTL_UNREG_ACT:
+		state.cur_aid = TMAID;
+		state.aid = INVAL_AID;
+		return (int)set_act_tcu();
 	default:
 		return -EINVAL;
 	}
@@ -229,6 +235,7 @@ static int __init tcu_init(void)
 	pr_info("tcu ioctl to tilemux mode: %#x", IOCTL_TO_TMX_MD);
 	pr_info("tcu ioctl to user mode: %#x", IOCTL_TO_USR_MD);
 	pr_info("tcu ioctl tlb insert: %#lx", IOCTL_TLB_INSRT);
+	pr_info("tcu ioctl exit: %#x", IOCTL_UNREG_ACT);
 
 	return 0;
 }
