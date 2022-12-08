@@ -18,19 +18,20 @@
 // kmalloc
 #include <linux/slab.h>
 
-// tilemux activity id
-#define TMAID 0xffff
+// privileged activity id
+#define PRIV_AID 0xffff
+// invalid activity id
 #define INVAL_AID 0xfffe
 
 typedef struct {
 	// current activity id
-	// set to TMAID or aid depending on whether we are in tilemux mode or user mode
+	// set to PRIV_AID or aid depending on whether we are in privileged or unprivileged mode
 	ActId cur_aid;
 	// set to activity id as soon as we register an activity
 	ActId aid;
 } state_t;
 
-static state_t state = { .cur_aid = TMAID, .aid = INVAL_AID };
+static state_t state = { .cur_aid = PRIV_AID, .aid = INVAL_AID };
 
 typedef struct {
 	uint64_t virt;
@@ -39,56 +40,64 @@ typedef struct {
 
 // register an activity, sets the act id in the state
 #define IOCTL_RGSTR_ACT _IOW('q', 1, ActId *)
-// goes to tilemux mode by setting the act tcu register
-#define IOCTL_TO_TMX_MD _IO('q', 2)
-// goes to user mode by setting the act tcu register
-#define IOCTL_TO_USR_MD _IO('q', 3)
 // inserts an entry in tcu tlb, uses current activity id
 #define IOCTL_TLB_INSRT _IOW('q', 4, TlbInsert *)
 // forgets about an activity
 #define IOCTL_UNREG_ACT _IO('q', 5)
 
-bool in_tmmode(void)
+static inline bool in_inval_mode(void)
 {
-	return state.cur_aid == TMAID;
+	return state.cur_aid == INVAL_AID;
 }
 
-Error set_act_tcu(void)
+static inline bool in_unpriv_mode(void)
 {
+	return state.cur_aid != INVAL_AID && state.cur_aid != PRIV_AID;
+}
+
+static inline bool in_priv_mode(void)
+{
+	return state.cur_aid == PRIV_AID;
+}
+
+static inline Error switch_to_inval(void) {
+	BUG_ON(!in_priv_mode());
+	state.aid = INVAL_AID;
+	state.cur_aid = INVAL_AID;
 	return xchg_activity(state.cur_aid);
 }
 
-static int register_activity(ActId aid)
-{
-	Error e;
-	if (state.aid != INVAL_AID) {
-		pr_err("cannot register more than one activity");
-		return -EINVAL;
-	}
-	if (aid == TMAID) {
-		pr_err("cannot register activity with id 0xffff");
-		return -EINVAL;
-	}
-	state.aid = aid;
-	e = snd_rcv_sidecall_lx_act();
-	return (int)e;
+static inline Error switch_to_unpriv(void) {
+	BUG_ON(!in_priv_mode());
+	BUG_ON(state.aid == INVAL_AID);
+	BUG_ON(state.aid == PRIV_AID);
+	state.cur_aid = state.aid;
+	return xchg_activity(state.cur_aid);
 }
 
-static int unregister_activity(void)
+static inline Error switch_to_priv(void) {
+	BUG_ON(in_priv_mode());
+	state.cur_aid = PRIV_AID;
+	return xchg_activity(state.cur_aid);
+}
+
+static int ioctl_register_activity(unsigned long arg)
 {
+	ActId aid;
 	Error e;
-	if (state.aid == INVAL_AID) {
+	BUG_ON(in_priv_mode());
+	if (!in_inval_mode()) {
+		pr_err("there is already an activity registered");
 		return -EINVAL;
 	}
-	e = snd_rcv_sidecall_exit(state.aid, 0);
-	if (e != Error_None) {
-		pr_err("failed to send exit sidecall: got error: %s",
-		       error_to_str(e));
-		return (int)e;
+	if (copy_from_user(&aid, (ActId *)arg, sizeof(ActId))) {
+		return -EACCES;
 	}
-	state.cur_aid = TMAID;
-	state.aid = INVAL_AID;
-	return (int)set_act_tcu();
+	state.aid = aid;
+	switch_to_priv();
+	e = snd_rcv_sidecall_lx_act();
+	switch_to_unpriv();
+	return (int)e;
 }
 
 // source: https://github.com/davidhcefx/Translate-Virtual-Address-To-Physical-Address-in-Linux-Kernel
@@ -117,46 +126,48 @@ static unsigned long vaddr2paddr(unsigned long address)
 	return phys;
 }
 
+static int ioctl_insert_tlb(unsigned long arg) {
+	TlbInsert ti;
+	uint64_t phys;
+	BUG_ON(in_priv_mode());
+	if (!in_unpriv_mode()) {
+		pr_err("there is no activity registered");
+	}
+	if (copy_from_user(&ti, (TlbInsert *)arg, sizeof(TlbInsert))) {
+		return -EACCES;
+	}
+	// TODO: check that it is mapped for the current process?
+	phys = vaddr2paddr(ti.virt);
+	if (phys == 0) {
+		pr_err("tlb insert: virtual address is not mapped");
+		return -EINVAL;
+	}
+	return (int)insert_tlb(state.cur_aid, ti.virt, phys, ti.perm);
+}
+
+static int ioctl_unregister_activity(void)
+{
+	Error e;
+	BUG_ON(in_priv_mode());
+	if (!in_unpriv_mode()) {
+		pr_err("there is no activity registered");
+		return -EINVAL;
+	}
+	switch_to_priv();
+	e = snd_rcv_sidecall_exit(state.aid, 0);
+	switch_to_inval();
+	return (int)e;
+}
+
 static long int tcu_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
 {
 	switch (cmd) {
-	case IOCTL_RGSTR_ACT: {
-		ActId aid;
-		if (copy_from_user(&aid, (ActId *)arg, sizeof(ActId))) {
-			return -EACCES;
-		}
-		return register_activity(aid);
-	} break;
-	case IOCTL_TO_TMX_MD:
-		if (in_tmmode()) {
-			return 0;
-		}
-		state.cur_aid = TMAID;
-		return (int)set_act_tcu();
-	case IOCTL_TO_USR_MD:
-		if (!in_tmmode()) {
-			return 0;
-		}
-		if (state.aid == INVAL_AID) {
-			return -EPERM;
-		}
-		state.cur_aid = state.aid;
-		return (int)set_act_tcu();
-	case IOCTL_TLB_INSRT: {
-		TlbInsert ti;
-		uint64_t phys;
-		if (copy_from_user(&ti, (TlbInsert *)arg, sizeof(TlbInsert))) {
-			return -EACCES;
-		}
-		phys = vaddr2paddr(ti.virt);
-		if (phys == 0) {
-			pr_err("tlb insert: virtual address is not mapped");
-			return -EINVAL;
-		}
-		return (int)insert_tlb(state.cur_aid, ti.virt, phys, ti.perm);
-	}
+	case IOCTL_RGSTR_ACT:
+		return ioctl_register_activity(arg);
+	case IOCTL_TLB_INSRT:
+		return ioctl_insert_tlb(arg);
 	case IOCTL_UNREG_ACT:
-		return unregister_activity();
+		return ioctl_unregister_activity();
 	default:
 		return -EINVAL;
 	}
@@ -304,9 +315,9 @@ static int __init tcu_init(void)
 	// the message needs to be 16 byte aligned
 	BUG_ON(((uintptr_t)snd_buf) % 16 != 0);
 
+	switch_to_inval();
+
 	pr_info("tcu ioctl register act: %#lx", IOCTL_RGSTR_ACT);
-	pr_info("tcu ioctl to tilemux mode: %#x", IOCTL_TO_TMX_MD);
-	pr_info("tcu ioctl to user mode: %#x", IOCTL_TO_USR_MD);
 	pr_info("tcu ioctl tlb insert: %#lx", IOCTL_TLB_INSRT);
 	pr_info("tcu ioctl exit: %#x", IOCTL_UNREG_ACT);
 
