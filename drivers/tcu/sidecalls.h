@@ -79,6 +79,7 @@ static Error snd_rcv_sidecall_lx_act(void) {
 	e = send_aligned(KPEX_SEP, snd_buf, len, 0, KPEX_REP);
 	if (e != Error_None) {
 		pr_err("lx act sidecall failed: %s", error_to_str(e));
+		return e;
 	}
 	e = wait_for_reply();
 	if (e != Error_None) {

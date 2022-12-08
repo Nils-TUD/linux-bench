@@ -2,6 +2,7 @@
 #include "sidecalls.h"
 #include "tculib.h"
 #include "cfg.h"
+#include "envdata.h"
 
 // module_init, module_exit
 #include <linux/module.h>
@@ -38,12 +39,12 @@ typedef struct {
 	uint8_t perm;
 } TlbInsert;
 
-// register an activity, sets the act id in the state
-#define IOCTL_RGSTR_ACT _IOW('q', 1, ActId *)
+// register an activity
+#define IOCTL_RGSTR_ACT _IO('q', 1)
 // inserts an entry in tcu tlb, uses current activity id
-#define IOCTL_TLB_INSRT _IOW('q', 4, TlbInsert *)
+#define IOCTL_TLB_INSRT _IOW('q', 2, TlbInsert *)
 // forgets about an activity
-#define IOCTL_UNREG_ACT _IO('q', 5)
+#define IOCTL_UNREG_ACT _IO('q', 3)
 
 static inline bool in_inval_mode(void)
 {
@@ -60,43 +61,60 @@ static inline bool in_priv_mode(void)
 	return state.cur_aid == PRIV_AID;
 }
 
-static inline Error switch_to_inval(void) {
+static inline Error switch_to_inval(void)
+{
 	BUG_ON(!in_priv_mode());
 	state.aid = INVAL_AID;
 	state.cur_aid = INVAL_AID;
+	pr_info("switch to inval");
 	return xchg_activity(state.cur_aid);
 }
 
-static inline Error switch_to_unpriv(void) {
+static inline Error switch_to_unpriv(void)
+{
 	BUG_ON(!in_priv_mode());
 	BUG_ON(state.aid == INVAL_AID);
 	BUG_ON(state.aid == PRIV_AID);
 	state.cur_aid = state.aid;
+	pr_info("switch to unpriv");
 	return xchg_activity(state.cur_aid);
 }
 
-static inline Error switch_to_priv(void) {
+static inline Error switch_to_priv(void)
+{
 	BUG_ON(in_priv_mode());
 	state.cur_aid = PRIV_AID;
+	pr_info("switch to priv");
 	return xchg_activity(state.cur_aid);
 }
 
-static int ioctl_register_activity(unsigned long arg)
+static int ioctl_register_activity(void)
 {
-	ActId aid;
 	Error e;
 	BUG_ON(in_priv_mode());
 	if (!in_inval_mode()) {
 		pr_err("there is already an activity registered");
 		return -EINVAL;
 	}
-	if (copy_from_user(&aid, (ActId *)arg, sizeof(ActId))) {
-		return -EACCES;
-	}
-	state.aid = aid;
 	switch_to_priv();
 	e = snd_rcv_sidecall_lx_act();
-	switch_to_unpriv();
+	if (e == Error_None) {
+		uint8_t* mem;
+		EnvData* env;
+		uint64_t env_page_off = ENV_START & PAGE_MASK;
+		uint64_t diff = ENV_START & ~PAGE_MASK;
+		mem = (uint8_t*)memremap(env_page_off, PAGE_SIZE,
+						   MEMREMAP_WB);
+		env = (EnvData*)(mem + diff);
+		BUG_ON(env == NULL);
+		pr_info("EnvData act_id: %llu", env->act_id);
+		state.aid = env->act_id;
+		memunmap(mem);
+		switch_to_unpriv();
+	} else {
+		switch_to_inval();
+	}
+	printk_safe_flush();
 	return (int)e;
 }
 
@@ -115,7 +133,8 @@ static unsigned long vaddr2paddr(unsigned long address)
 					pte_t *pte =
 						pte_offset_map(pmd, address);
 					if (!pte_none(*pte)) {
-						struct page *pg = pte_page(*pte);
+						struct page *pg =
+							pte_page(*pte);
 						phys = page_to_phys(pg);
 					}
 					pte_unmap(pte);
@@ -126,7 +145,8 @@ static unsigned long vaddr2paddr(unsigned long address)
 	return phys;
 }
 
-static int ioctl_insert_tlb(unsigned long arg) {
+static int ioctl_insert_tlb(unsigned long arg)
+{
 	TlbInsert ti;
 	uint64_t phys;
 	BUG_ON(in_priv_mode());
@@ -163,12 +183,13 @@ static long int tcu_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
 {
 	switch (cmd) {
 	case IOCTL_RGSTR_ACT:
-		return ioctl_register_activity(arg);
+		return ioctl_register_activity();
 	case IOCTL_TLB_INSRT:
 		return ioctl_insert_tlb(arg);
 	case IOCTL_UNREG_ACT:
 		return ioctl_unregister_activity();
 	default:
+		pr_err("received ioctl call without unknown magic number");
 		return -EINVAL;
 	}
 	return 0;
@@ -317,7 +338,7 @@ static int __init tcu_init(void)
 
 	switch_to_inval();
 
-	pr_info("tcu ioctl register act: %#lx", IOCTL_RGSTR_ACT);
+	pr_info("tcu ioctl register act: %#x", IOCTL_RGSTR_ACT);
 	pr_info("tcu ioctl tlb insert: %#lx", IOCTL_TLB_INSRT);
 	pr_info("tcu ioctl exit: %#x", IOCTL_UNREG_ACT);
 
