@@ -1,5 +1,7 @@
 
+#include "sidecalls.h"
 #include "tculib.h"
+#include "cfg.h"
 
 // module_init, module_exit
 #include <linux/module.h>
@@ -12,6 +14,9 @@
 
 // ioremap, iounmap
 #include <linux/io.h>
+
+// kmalloc
+#include <linux/slab.h>
 
 // tilemux activity id
 #define TMAID 0xffff
@@ -33,13 +38,13 @@ typedef struct {
 } TlbInsert;
 
 // register an activity, sets the act id in the state
-#define IOCTL_RGSTR_ACT _IOW('q', 1, ActId*)
+#define IOCTL_RGSTR_ACT _IOW('q', 1, ActId *)
 // goes to tilemux mode by setting the act tcu register
 #define IOCTL_TO_TMX_MD _IO('q', 2)
 // goes to user mode by setting the act tcu register
 #define IOCTL_TO_USR_MD _IO('q', 3)
 // inserts an entry in tcu tlb, uses current activity id
-#define IOCTL_TLB_INSRT _IOW('q', 4, TlbInsert*)
+#define IOCTL_TLB_INSRT _IOW('q', 4, TlbInsert *)
 // forgets about an activity
 #define IOCTL_UNREG_ACT _IO('q', 5)
 
@@ -53,23 +58,74 @@ Error set_act_tcu(void)
 	return xchg_activity(state.cur_aid);
 }
 
+static int register_activity(ActId aid)
+{
+	Error e;
+	if (state.aid != INVAL_AID) {
+		pr_err("cannot register more than one activity");
+		return -EINVAL;
+	}
+	if (aid == TMAID) {
+		pr_err("cannot register activity with id 0xffff");
+		return -EINVAL;
+	}
+	state.aid = aid;
+	e = snd_rcv_sidecall_lx_act();
+	return (int)e;
+}
+
+static int unregister_activity(void)
+{
+	Error e;
+	if (state.aid == INVAL_AID) {
+		return -EINVAL;
+	}
+	e = snd_rcv_sidecall_exit(state.aid, 0);
+	if (e != Error_None) {
+		pr_err("failed to send exit sidecall: got error: %s",
+		       error_to_str(e));
+		return (int)e;
+	}
+	state.cur_aid = TMAID;
+	state.aid = INVAL_AID;
+	return (int)set_act_tcu();
+}
+
+// source: https://github.com/davidhcefx/Translate-Virtual-Address-To-Physical-Address-in-Linux-Kernel
+static unsigned long vaddr2paddr(unsigned long address)
+{
+	uint64_t phys = 0;
+	pgd_t *pgd = pgd_offset(current->mm, address);
+	if (!pgd_none(*pgd) && !pgd_bad(*pgd)) {
+		p4d_t *p4d = p4d_offset(pgd, address);
+		if (!p4d_none(*p4d) && !p4d_bad(*p4d)) {
+			pud_t *pud = pud_offset(p4d, address);
+			if (!pud_none(*pud) && !pud_bad(*pud)) {
+				pmd_t *pmd = pmd_offset(pud, address);
+				if (!pmd_none(*pmd) && !pmd_bad(*pmd)) {
+					pte_t *pte =
+						pte_offset_map(pmd, address);
+					if (!pte_none(*pte)) {
+						struct page *pg = pte_page(*pte);
+						phys = page_to_phys(pg);
+					}
+					pte_unmap(pte);
+				}
+			}
+		}
+	}
+	return phys;
+}
+
 static long int tcu_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
 {
 	switch (cmd) {
 	case IOCTL_RGSTR_ACT: {
 		ActId aid;
-		if (state.aid != INVAL_AID) {
-			pr_err("cannot register more than one activity");
-			return -EINVAL;
-		}
 		if (copy_from_user(&aid, (ActId *)arg, sizeof(ActId))) {
 			return -EACCES;
 		}
-		if (aid == TMAID) {
-			pr_err("cannot register activity with id 0xffff");
-			return -EINVAL;
-		}
-		state.aid = aid;
+		return register_activity(aid);
 	} break;
 	case IOCTL_TO_TMX_MD:
 		if (in_tmmode()) {
@@ -88,15 +144,19 @@ static long int tcu_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
 		return (int)set_act_tcu();
 	case IOCTL_TLB_INSRT: {
 		TlbInsert ti;
-		if (copy_from_user(&ti, (TlbInsert*)arg, sizeof(TlbInsert))) {
+		uint64_t phys;
+		if (copy_from_user(&ti, (TlbInsert *)arg, sizeof(TlbInsert))) {
 			return -EACCES;
 		}
-		return (int)insert_tlb(state.cur_aid, ti.virt, ti.perm);
+		phys = vaddr2paddr(ti.virt);
+		if (phys == 0) {
+			pr_err("tlb insert: virtual address is not mapped");
+			return -EINVAL;
+		}
+		return (int)insert_tlb(state.cur_aid, ti.virt, phys, ti.perm);
 	}
 	case IOCTL_UNREG_ACT:
-		state.cur_aid = TMAID;
-		state.aid = INVAL_AID;
-		return (int)set_act_tcu();
+		return unregister_activity();
 	default:
 		return -EINVAL;
 	}
@@ -228,8 +288,8 @@ static int __init tcu_init(void)
 	if (dev == (dev_t)-1) {
 		return -1;
 	}
-	priv_base = (uint64_t *)ioremap(MMIO_PRIV_ADDR, MMIO_PRIV_SIZE);
-	if (!priv_base) {
+	unpriv_base = (uint64_t *)ioremap(MMIO_ADDR, MMIO_SIZE);
+	if (!unpriv_base) {
 		dev_t tcu_dev = MKDEV(major, TCU_MINOR);
 		pr_err("failed to ioremap the private tcu mmio interface");
 		device_destroy(dev_class, tcu_dev);
@@ -237,6 +297,13 @@ static int __init tcu_init(void)
 		class_destroy(dev_class);
 		return -1;
 	}
+	priv_base = unpriv_base + (MMIO_UNPRIV_SIZE / sizeof(uint64_t));
+	rcv_buf = (uint8_t *)memremap(TILEMUX_RBUF_SPACE, KPEX_RBUF_SIZE,
+				      MEMREMAP_WB);
+	snd_buf = (uint8_t *)kmalloc(MAX_MSG_SIZE, GFP_KERNEL);
+	// the message needs to be 16 byte aligned
+	BUG_ON(((uintptr_t)snd_buf) % 16 != 0);
+
 	pr_info("tcu ioctl register act: %#lx", IOCTL_RGSTR_ACT);
 	pr_info("tcu ioctl to tilemux mode: %#x", IOCTL_TO_TMX_MD);
 	pr_info("tcu ioctl to user mode: %#x", IOCTL_TO_USR_MD);
@@ -249,7 +316,9 @@ static int __init tcu_init(void)
 static void __exit tcu_exit(void)
 {
 	dev_t tcu_dev = MKDEV(major, TCU_MINOR);
-	iounmap((void *)priv_base);
+	kfree(snd_buf);
+	iounmap((void *)unpriv_base);
+	memunmap(rcv_buf);
 	device_destroy(dev_class, tcu_dev);
 	class_destroy(dev_class);
 	unregister_chrdev_region(tcu_dev, DEV_COUNT);
