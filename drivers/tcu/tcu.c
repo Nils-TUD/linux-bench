@@ -114,7 +114,6 @@ static int ioctl_register_activity(void)
 	} else {
 		switch_to_inval();
 	}
-	printk_safe_flush();
 	return (int)e;
 }
 
@@ -195,40 +194,6 @@ static long int tcu_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
 	return 0;
 }
 
-#ifdef __HAVE_PHYS_MEM_ACCESS_PROT
-#error "__HAVE_PHYS_MEM_ACCESS_PROT is defined"
-#endif
-
-// TODO: is this necessary?
-#ifdef pgprot_noncached
-static int uncached_access(struct file *file, phys_addr_t addr)
-{
-	if (file->f_flags & O_DSYNC)
-		return 1;
-	return addr >= __pa(high_memory);
-}
-#endif
-
-// TODO: is this necessary?
-static pgprot_t phys_mem_access_prot(struct file *file, unsigned long pfn,
-				     unsigned long size, pgprot_t vma_prot)
-{
-#ifdef pgprot_noncached
-	phys_addr_t offset = pfn << PAGE_SHIFT;
-
-	if (uncached_access(file, offset))
-		return pgprot_noncached(vma_prot);
-#endif
-	return vma_prot;
-}
-
-// TODO: is this necessary?
-static const struct vm_operations_struct mmap_mem_ops = {
-#ifdef CONFIG_HAVE_IOREMAP_PROT
-	.access = generic_access_phys
-#endif
-};
-
 static int tcu_dev_mmap(struct file *file, struct vm_area_struct *vma)
 {
 	size_t size = vma->vm_end - vma->vm_start;
@@ -250,11 +215,6 @@ static int tcu_dev_mmap(struct file *file, struct vm_area_struct *vma)
 		pr_err("tcu mmap invalid area");
 		return -EINVAL;
 	}
-
-	vma->vm_page_prot = phys_mem_access_prot(file, vma->vm_pgoff, size,
-						 vma->vm_page_prot);
-
-	vma->vm_ops = &mmap_mem_ops;
 
 	/* Remap-pfn-range will mark the range VM_IO */
 	if (io_remap_pfn_range(vma, vma->vm_start, vma->vm_pgoff, size,
