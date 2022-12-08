@@ -7,6 +7,8 @@
 #include <linux/kernel.h>
 #include <linux/io.h>
 #include <asm/barrier.h>
+#include <linux/printk.h>
+#include <linux/sched.h>
 
 typedef uint64_t EpId;
 typedef uint64_t Reg;
@@ -88,15 +90,17 @@ typedef enum {
 
 typedef enum {
     /// Starts commands and signals their completion
-    UnprivReg_COMMAND  = 0x0,
-    /// Specifies the data address and size
-    UnprivReg_DATA     = 0x1,
+    UnprivReg_COMMAND   = 0x0,
+    /// Specifies the data address
+    UnprivReg_DATA_ADDR = 0x1,
+    /// Specifies the data size
+    UnprivReg_DATA_SIZE = 0x2,
     /// Specifies an additional argument
-    UnprivReg_ARG1     = 0x2,
+    UnprivReg_ARG1      = 0x3,
     /// The current time in nanoseconds
-    UnprivReg_CUR_TIME = 0x3,
+    UnprivReg_CUR_TIME  = 0x4,
     /// Prints a line into the gem5 log
-    UnprivReg_PRINT    = 0x4,
+    UnprivReg_PRINT     = 0x5,
 } UnprivReg;
 
 static void write_priv_reg(unsigned int index, Reg val) {
@@ -120,14 +124,45 @@ static Error get_priv_error(void) {
     }
 }
 
-static Error insert_tlb(uint16_t asid, uint32_t virt, uint64_t phys, uint32_t perm) {
+// source: https://github.com/davidhcefx/Translate-Virtual-Address-To-Physical-Address-in-Linux-Kernel
+static unsigned long vaddr2paddr(unsigned long address) {
+    pgd_t *pgd = pgd_offset(current->mm, address);
+    if (!pgd_none(*pgd) && !pgd_bad(*pgd)) {
+        p4d_t *p4d = p4d_offset(pgd, address);
+        if (!p4d_none(*p4d) && !p4d_bad(*p4d)) {
+            pud_t *pud = pud_offset(p4d, address);
+            if (!pud_none(*pud) && !pud_bad(*pud)) {
+                pmd_t *pmd = pmd_offset(pud, address);
+                if (!pmd_none(*pmd) && !pmd_bad(*pmd)) {
+                    pte_t *pte = pte_offset_map(pmd, address);
+                    if (!pte_none(*pte)) {
+                        struct page *pg = pte_page(*pte);
+                        return page_to_phys(pg);
+                    }
+                    pte_unmap(pte);
+                }
+            }
+        }
+    }
+    return 0;
+}
+
+static Error insert_tlb(uint16_t asid, uint64_t virt, uint8_t perm) {
     Reg cmd;
     Error e;
-    write_priv_reg(PrivReg_PRIV_CMD_ARG, phys);
+    uint64_t phys;
+    write_priv_reg(PrivReg_PRIV_CMD_ARG, virt & PAGE_MASK);
+    phys = vaddr2paddr(virt);
+    if (phys == 0) {
+        pr_err("could not translate virtual address %#llx to physical address", virt);
+        return Error_NotFound;
+    }
+    pr_info("tlb insert: virt: %#llx, phys: %#llx", virt, phys);
+    BUG_ON(phys >> 32 != 0);
     mb();
     cmd = ((Reg)asid << 41)
-        | ((virt & PAGE_MASK) << 9)
-        | (perm << 9)
+        | ((phys & PAGE_MASK) << 9)
+        | (((uint32_t)perm) << 9)
         | PrivCmdOpCode_INS_TLB;
     write_priv_reg(PrivReg_PRIV_CMD, cmd);
     e = get_priv_error();

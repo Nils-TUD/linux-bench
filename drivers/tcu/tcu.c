@@ -16,8 +16,6 @@
 // tilemux activity id
 #define TMAID 0xffff
 #define INVAL_AID 0xfffe
-// read permission for tlb entry
-#define READ_PERM 0x1
 
 typedef struct {
 	// current activity id
@@ -30,18 +28,18 @@ typedef struct {
 static state_t state = { .cur_aid = TMAID, .aid = INVAL_AID };
 
 typedef struct {
-	uint64_t phys;
-	uint32_t virt;
-} tlb_insert_t;
+	uint64_t virt;
+	uint8_t perm;
+} TlbInsert;
 
 // register an activity, sets the act id in the state
-#define IOCTL_RGSTR_ACT _IOW('q', 1, ActId *)
+#define IOCTL_RGSTR_ACT _IOW('q', 1, ActId*)
 // goes to tilemux mode by setting the act tcu register
 #define IOCTL_TO_TMX_MD _IO('q', 2)
 // goes to user mode by setting the act tcu register
 #define IOCTL_TO_USR_MD _IO('q', 3)
 // inserts an entry in tcu tlb, uses current activity id
-#define IOCTL_TLB_INSRT _IOW('q', 4, tlb_insert_t *)
+#define IOCTL_TLB_INSRT _IOW('q', 4, TlbInsert*)
 // forgets about an activity
 #define IOCTL_UNREG_ACT _IO('q', 5)
 
@@ -57,13 +55,22 @@ Error set_act_tcu(void)
 
 static long int tcu_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
 {
-	tlb_insert_t ti;
 	switch (cmd) {
-	case IOCTL_RGSTR_ACT:
-		if (copy_from_user(&state.aid, (ActId *)arg, sizeof(ActId))) {
+	case IOCTL_RGSTR_ACT: {
+		ActId aid;
+		if (state.aid != INVAL_AID) {
+			pr_err("cannot register more than one activity");
+			return -EINVAL;
+		}
+		if (copy_from_user(&aid, (ActId *)arg, sizeof(ActId))) {
 			return -EACCES;
 		}
-		break;
+		if (aid == TMAID) {
+			pr_err("cannot register activity with id 0xffff");
+			return -EINVAL;
+		}
+		state.aid = aid;
+	} break;
 	case IOCTL_TO_TMX_MD:
 		if (in_tmmode()) {
 			return 0;
@@ -79,14 +86,13 @@ static long int tcu_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
 		}
 		state.cur_aid = state.aid;
 		return (int)set_act_tcu();
-	case IOCTL_TLB_INSRT:
-		if (copy_from_user(&ti, (tlb_insert_t *)arg,
-				   sizeof(tlb_insert_t))) {
+	case IOCTL_TLB_INSRT: {
+		TlbInsert ti;
+		if (copy_from_user(&ti, (TlbInsert*)arg, sizeof(TlbInsert))) {
 			return -EACCES;
 		}
-		return (int)insert_tlb(state.cur_aid, ti.virt, ti.phys,
-				       READ_PERM);
-		break;
+		return (int)insert_tlb(state.cur_aid, ti.virt, ti.perm);
+	}
 	case IOCTL_UNREG_ACT:
 		state.cur_aid = TMAID;
 		state.aid = INVAL_AID;

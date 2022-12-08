@@ -33,6 +33,45 @@ typedef enum Error {
 	Error_MsgUnaligned,
 	Error_TLBMiss,
 	Error_TLBFull,
+	// SW Errors
+	Error_InvArgs,
+	Error_ActivityGone,
+	Error_OutOfMem,
+	Error_NoSuchFile,
+	Error_NotSup,
+	Error_NoFreeTile,
+	Error_InvalidElf,
+	Error_NoSpace,
+	Error_Exists,
+	Error_XfsLink,
+	Error_DirNotEmpty,
+	Error_IsDir,
+	Error_IsNoDir,
+	Error_EPInvalid,
+	Error_EndOfFile,
+	Error_MsgsWaiting,
+	Error_UpcallReply,
+	Error_CommitFailed,
+	Error_NoKernMem,
+	Error_NotFound,
+	Error_NotRevocable,
+	Error_Timeout,
+	Error_ReadFailed,
+	Error_WriteFailed,
+	Error_Utf8Error,
+	Error_BadFd,
+	Error_SeekPipe,
+	// networking
+	Error_InvState,
+	Error_WouldBlock,
+	Error_InProgress,
+	Error_AlreadyInProgress,
+	Error_NotConnected,
+	Error_IsConnected,
+	Error_InvChecksum,
+	Error_SocketClosed,
+	Error_ConnectionFailed,
+
 } Error;
 
 char *error_to_str(Error e)
@@ -90,6 +129,78 @@ char *error_to_str(Error e)
 		return "TLBMiss";
 	case Error_TLBFull:
 		return "TLBFull";
+	case Error_InvArgs:
+		return "InvArgs";
+	case Error_ActivityGone:
+		return "ActivityGone";
+	case Error_OutOfMem:
+		return "OutOfMem";
+	case Error_NoSuchFile:
+		return "NoSuchFile";
+	case Error_NotSup:
+		return "NotSup";
+	case Error_NoFreeTile:
+		return "NoFreeTile";
+	case Error_InvalidElf:
+		return "InvalidElf";
+	case Error_NoSpace:
+		return "NoSpace";
+	case Error_Exists:
+		return "Exists";
+	case Error_XfsLink:
+		return "XfsLink";
+	case Error_DirNotEmpty:
+		return "DirNotEmpty";
+	case Error_IsDir:
+		return "IsDir";
+	case Error_IsNoDir:
+		return "IsNoDir";
+	case Error_EPInvalid:
+		return "EPInvalid";
+	case Error_EndOfFile:
+		return "EndOfFile";
+	case Error_MsgsWaiting:
+		return "MsgsWaiting";
+	case Error_UpcallReply:
+		return "UpcallReply";
+	case Error_CommitFailed:
+		return "CommitFailed";
+	case Error_NoKernMem:
+		return "NoKernMem";
+	case Error_NotFound:
+		return "NotFound";
+	case Error_NotRevocable:
+		return "NotRevocable";
+	case Error_Timeout:
+		return "Timeout";
+	case Error_ReadFailed:
+		return "ReadFailed";
+	case Error_WriteFailed:
+		return "WriteFailed";
+	case Error_Utf8Error:
+		return "Utf8Error";
+	case Error_BadFd:
+		return "BadFd";
+	case Error_SeekPipe:
+		return "SeekPipe";
+	case Error_InvState:
+		return "InvState";
+	case Error_WouldBlock:
+		return "WouldBlock";
+	case Error_InProgress:
+		return "InProgress";
+	case Error_AlreadyInProgress:
+		return "AlreadyInProgress";
+	case Error_NotConnected:
+		return "NotConnected";
+	case Error_IsConnected:
+		return "IsConnected";
+	case Error_InvChecksum:
+		return "InvChecksum";
+	case Error_SocketClosed:
+		return "SocketClosed";
+	case Error_ConnectionFailed:
+		return "ConnectionFailed";
 	default:
 		return "Unknown Error";
 	}
