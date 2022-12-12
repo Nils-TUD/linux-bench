@@ -66,7 +66,6 @@ static inline Error switch_to_inval(void)
 	BUG_ON(!in_priv_mode());
 	state.aid = INVAL_AID;
 	state.cur_aid = INVAL_AID;
-	pr_info("switch to inval");
 	return xchg_activity(state.cur_aid);
 }
 
@@ -76,7 +75,6 @@ static inline Error switch_to_unpriv(void)
 	BUG_ON(state.aid == INVAL_AID);
 	BUG_ON(state.aid == PRIV_AID);
 	state.cur_aid = state.aid;
-	pr_info("switch to unpriv");
 	return xchg_activity(state.cur_aid);
 }
 
@@ -84,7 +82,6 @@ static inline Error switch_to_priv(void)
 {
 	BUG_ON(in_priv_mode());
 	state.cur_aid = PRIV_AID;
-	pr_info("switch to priv");
 	return xchg_activity(state.cur_aid);
 }
 
@@ -98,23 +95,24 @@ static int ioctl_register_activity(void)
 	}
 	switch_to_priv();
 	e = snd_rcv_sidecall_lx_act();
-	if (e == Error_None) {
-		uint8_t* mem;
-		EnvData* env;
+	if (e != Error_None) {
+		switch_to_inval();
+		return (int)e;
+	}
+	{
+		uint8_t *mem;
+		EnvData *env;
 		uint64_t env_page_off = ENV_START & PAGE_MASK;
 		uint64_t diff = ENV_START & ~PAGE_MASK;
-		mem = (uint8_t*)memremap(env_page_off, PAGE_SIZE,
-						   MEMREMAP_WB);
-		env = (EnvData*)(mem + diff);
+		mem = (uint8_t *)memremap(env_page_off, PAGE_SIZE, MEMREMAP_WB);
+		env = (EnvData *)(mem + diff);
 		BUG_ON(env == NULL);
 		pr_info("EnvData act_id: %llu", env->act_id);
 		state.aid = env->act_id;
 		memunmap(mem);
-		switch_to_unpriv();
-	} else {
-		switch_to_inval();
 	}
-	return (int)e;
+	switch_to_unpriv();
+	return 0;
 }
 
 // source: https://github.com/davidhcefx/Translate-Virtual-Address-To-Physical-Address-in-Linux-Kernel
