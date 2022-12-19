@@ -15,6 +15,11 @@ typedef uint64_t EpId;
 typedef uint64_t Label;
 typedef uint16_t ActId;
 
+// privileged activity id
+#define PRIV_AID 0xffff
+// invalid activity id
+#define INVAL_AID 0xfffe
+
 #define MMIO_UNPRIV_ADDR 0xf0000000
 #define MMIO_UNPRIV_SIZE (2 * PAGE_SIZE)
 #define MMIO_PRIV_ADDR 0xf0002000
@@ -22,11 +27,13 @@ typedef uint16_t ActId;
 #define MMIO_ADDR MMIO_UNPRIV_ADDR
 #define MMIO_SIZE (MMIO_UNPRIV_SIZE + MMIO_PRIV_SIZE)
 
-#define PMEM_PROT_EPS 4
+#define PMEM_PROT_EPS ((EpId)4)
 /// The send EP for kernel calls from TileMux
-#define KPEX_SEP ((EpId)PMEM_PROT_EPS + 0)
+#define KPEX_SEP (PMEM_PROT_EPS + 0)
 /// The receive EP for kernel calls from TileMux
-#define KPEX_REP ((EpId)PMEM_PROT_EPS + 1)
+#define KPEX_REP (PMEM_PROT_EPS + 1)
+/// The receive EP for sidecalls from the kernel for TileMux
+#define TMSIDE_REP (PMEM_PROT_EPS + 2)
 
 /// The number of external registers
 #define EXT_REGS 2
@@ -154,7 +161,8 @@ static Error insert_tlb(uint16_t asid, uint64_t virt, uint64_t phys,
 {
 	Reg cmd;
 	Error e;
-	pr_info("tlb insert: asid: %#hx, virt: %#llx, phys: %#llx", asid, virt, phys);
+	pr_info("tlb insert: asid: %#hx, virt: %#llx, phys: %#llx\n", asid, virt,
+		phys);
 	BUG_ON(phys >> 32 != 0);
 	write_priv_reg(PrivReg_PRIV_CMD_ARG, virt & PAGE_MASK);
 	mb();
@@ -163,7 +171,7 @@ static Error insert_tlb(uint16_t asid, uint64_t virt, uint64_t phys,
 	write_priv_reg(PrivReg_PRIV_CMD, cmd);
 	e = get_priv_error();
 	if (e) {
-		pr_err("failed to insert tlb entry, got error %s",
+		pr_err("failed to insert tlb entry, got error %s\n",
 		       error_to_str(e));
 	}
 	return e;
@@ -175,7 +183,7 @@ static Error xchg_activity(Reg actid)
 	write_priv_reg(PrivReg_PRIV_CMD, (actid << 9) | PrivCmdOpCode_XCHG_ACT);
 	e = get_priv_error();
 	if (e) {
-		pr_err("failed to exchange activities, got error: %s",
+		pr_err("failed to exchange activities, got error: %s\n",
 		       error_to_str(e));
 	}
 	// read_priv_reg(PrivReg_PRIV_CMD_ARG);
@@ -217,6 +225,15 @@ static Error send_aligned(EpId ep, uint8_t *msg, size_t len, Label reply_lbl,
 				  build_cmd(ep, CmdOpCode_SEND, (Reg)reply_ep));
 }
 
+static Error reply_aligned(EpId ep, uint8_t *reply, size_t len, size_t msg_off)
+{
+	Reg reply_addr = (Reg)reply;
+	write_unpriv_reg(UnprivReg_DATA_ADDR, reply_addr);
+	write_unpriv_reg(UnprivReg_DATA_SIZE, (Reg)len);
+	return perform_send_reply(reply_addr,
+			   build_cmd(ep, CmdOpCode_REPLY, (Reg)msg_off));
+}
+
 // returns ~(size_t)0 if there is no message or there was an error
 static size_t fetch_msg(EpId ep)
 {
@@ -225,7 +242,7 @@ static size_t fetch_msg(EpId ep)
 			 build_cmd(ep, CmdOpCode_FETCH_MSG, 0));
 	e = get_unpriv_error();
 	if (e != Error_None) {
-		pr_err("fetch_msg: got error %s", error_to_str(e));
+		pr_err("fetch_msg: got error %s\n", error_to_str(e));
 		return ~(size_t)0;
 	}
 	return read_unpriv_reg(UnprivReg_ARG1);

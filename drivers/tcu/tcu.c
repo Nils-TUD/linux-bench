@@ -19,11 +19,6 @@
 // kmalloc
 #include <linux/slab.h>
 
-// privileged activity id
-#define PRIV_AID 0xffff
-// invalid activity id
-#define INVAL_AID 0xfffe
-
 typedef struct {
 	// current activity id
 	// set to PRIV_AID or aid depending on whether we are in privileged or unprivileged mode
@@ -87,30 +82,18 @@ static inline Error switch_to_priv(void)
 
 static int ioctl_register_activity(void)
 {
-	Error e;
-	BUG_ON(in_priv_mode());
-	if (!in_inval_mode()) {
-		pr_err("there is already an activity registered");
+	ActId aid;
+	// BUG_ON(in_priv_mode());
+	// if (!in_inval_mode()) {
+	// 	pr_err("there is already an activity registered\n");
+	// 	return -EINVAL;
+	// }
+	aid = check_for_act_init();
+	if (aid == INVAL_AID) {
+		switch_to_inval();
 		return -EINVAL;
 	}
-	switch_to_priv();
-	e = snd_rcv_sidecall_lx_act();
-	if (e != Error_None) {
-		switch_to_inval();
-		return (int)e;
-	}
-	{
-		uint8_t *mem;
-		EnvData *env;
-		uint64_t env_page_off = ENV_START & PAGE_MASK;
-		uint64_t diff = ENV_START & ~PAGE_MASK;
-		mem = (uint8_t *)memremap(env_page_off, PAGE_SIZE, MEMREMAP_WB);
-		env = (EnvData *)(mem + diff);
-		BUG_ON(env == NULL);
-		pr_info("EnvData act_id: %llu", env->act_id);
-		state.aid = env->act_id;
-		memunmap(mem);
-	}
+	state.aid = aid;
 	switch_to_unpriv();
 	return 0;
 }
@@ -148,7 +131,7 @@ static int ioctl_insert_tlb(unsigned long arg)
 	uint64_t phys;
 	BUG_ON(in_priv_mode());
 	if (!in_unpriv_mode()) {
-		pr_err("there is no activity registered");
+		pr_err("there is no activity registered\n");
 	}
 	if (copy_from_user(&ti, (TlbInsert *)arg, sizeof(TlbInsert))) {
 		return -EACCES;
@@ -156,7 +139,7 @@ static int ioctl_insert_tlb(unsigned long arg)
 	// TODO: check that it is mapped for the current process?
 	phys = vaddr2paddr(ti.virt);
 	if (phys == 0) {
-		pr_err("tlb insert: virtual address is not mapped");
+		pr_err("tlb insert: virtual address is not mapped\n");
 		return -EINVAL;
 	}
 	return (int)insert_tlb(state.cur_aid, ti.virt, phys, ti.perm);
@@ -167,7 +150,7 @@ static int ioctl_unregister_activity(void)
 	Error e;
 	BUG_ON(in_priv_mode());
 	if (!in_unpriv_mode()) {
-		pr_err("there is no activity registered");
+		pr_err("there is no activity registered\n");
 		return -EINVAL;
 	}
 	switch_to_priv();
@@ -186,7 +169,7 @@ static long int tcu_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
 	case IOCTL_UNREG_ACT:
 		return ioctl_unregister_activity();
 	default:
-		pr_err("received ioctl call without unknown magic number");
+		pr_err("received ioctl call without unknown magic number\n");
 		return -EINVAL;
 	}
 	return 0;
@@ -210,14 +193,14 @@ static int tcu_dev_mmap(struct file *file, struct vm_area_struct *vma)
 
 	/* We only want to support mapping the tcu mmio area */
 	if (offset != MMIO_UNPRIV_ADDR || size != MMIO_UNPRIV_SIZE) {
-		pr_err("tcu mmap invalid area");
+		pr_err("tcu mmap invalid area\n");
 		return -EINVAL;
 	}
 
 	/* Remap-pfn-range will mark the range VM_IO */
 	if (io_remap_pfn_range(vma, vma->vm_start, vma->vm_pgoff, size,
 			       vma->vm_page_prot)) {
-		pr_err("tcu mmap - remap_pfn_range failed");
+		pr_err("tcu mmap - remap_pfn_range failed\n");
 		return -EAGAIN;
 	}
 	return 0;
@@ -243,27 +226,27 @@ static dev_t create_tcu_dev(void)
 
 	retval = alloc_chrdev_region(&dev, TCU_MINOR, DEV_COUNT, "tcu");
 	if (retval < 0) {
-		pr_err("failed to allocate major number for tcu device");
+		pr_err("failed to allocate major number for tcu device\n");
 		return -1;
 	}
 	major = MAJOR(dev);
 	cdev_init(&cdev, &fops);
 	retval = cdev_add(&cdev, dev, DEV_COUNT);
 	if (retval < 0) {
-		pr_err("failed to add tcu device");
+		pr_err("failed to add tcu device\n");
 		unregister_chrdev_region(dev, DEV_COUNT);
 		return -1;
 	}
 	dev_class = class_create(THIS_MODULE, "tcu");
 	if (IS_ERR(dev_class)) {
-		pr_err("failed to create device class for tcu device");
+		pr_err("failed to create device class for tcu device\n");
 		unregister_chrdev_region(dev, DEV_COUNT);
 		return -1;
 	}
 	tcu_device = device_create(dev_class, NULL, MKDEV(major, TCU_MINOR),
 				   NULL, "tcu");
 	if (IS_ERR(tcu_device)) {
-		pr_err("failed to create tcu device");
+		pr_err("failed to create tcu device\n");
 		unregister_chrdev_region(dev, DEV_COUNT);
 		class_destroy(dev_class);
 		return -1;
@@ -281,24 +264,22 @@ static int __init tcu_init(void)
 	unpriv_base = (uint64_t *)ioremap(MMIO_ADDR, MMIO_SIZE);
 	if (!unpriv_base) {
 		dev_t tcu_dev = MKDEV(major, TCU_MINOR);
-		pr_err("failed to ioremap the private tcu mmio interface");
+		pr_err("failed to ioremap the private tcu mmio interface\n");
 		device_destroy(dev_class, tcu_dev);
 		unregister_chrdev_region(dev, DEV_COUNT);
 		class_destroy(dev_class);
 		return -1;
 	}
 	priv_base = unpriv_base + (MMIO_UNPRIV_SIZE / sizeof(uint64_t));
-	rcv_buf = (uint8_t *)memremap(TILEMUX_RBUF_SPACE, KPEX_RBUF_SIZE,
+	rcv_buf = (uint8_t *)memremap(SIDE_RBUF_ADDR, KPEX_RBUF_SIZE,
 				      MEMREMAP_WB);
 	snd_buf = (uint8_t *)kmalloc(MAX_MSG_SIZE, GFP_KERNEL);
 	// the message needs to be 16 byte aligned
 	BUG_ON(((uintptr_t)snd_buf) % 16 != 0);
 
-	switch_to_inval();
-
-	pr_info("tcu ioctl register act: %#x", IOCTL_RGSTR_ACT);
-	pr_info("tcu ioctl tlb insert: %#lx", IOCTL_TLB_INSRT);
-	pr_info("tcu ioctl exit: %#x", IOCTL_UNREG_ACT);
+	pr_info("tcu ioctl register act: %#x\n", IOCTL_RGSTR_ACT);
+	pr_info("tcu ioctl tlb insert: %#lx\n", IOCTL_TLB_INSRT);
+	pr_info("tcu ioctl exit: %#x\n", IOCTL_UNREG_ACT);
 
 	return 0;
 }
@@ -312,7 +293,7 @@ static void __exit tcu_exit(void)
 	device_destroy(dev_class, tcu_dev);
 	class_destroy(dev_class);
 	unregister_chrdev_region(tcu_dev, DEV_COUNT);
-	pr_info("removed tcu driver");
+	pr_info("removed tcu driver\n");
 }
 
 module_init(tcu_init);

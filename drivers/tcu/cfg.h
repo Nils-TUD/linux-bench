@@ -11,4 +11,6 @@
 #define KPEX_RBUF_ORD      6
 #define KPEX_RBUF_SIZE     (1 << KPEX_RBUF_ORD)
 
+#define SIDE_RBUF_ADDR     (TILEMUX_RBUF_SPACE + KPEX_RBUF_SIZE)
+
 #endif // CFG_H
