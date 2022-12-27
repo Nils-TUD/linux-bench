@@ -2,6 +2,8 @@
 #ifndef CFG_H
 #define CFG_H
 
+#define RBUF_STD_ADDR      0xd0000000
+
 #define MEM_OFFSET         0x10000000
 #define ENV_START          (MEM_OFFSET + 0x8)
 

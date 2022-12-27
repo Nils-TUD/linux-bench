@@ -88,7 +88,11 @@ static int ioctl_register_activity(void)
 	// 	pr_err("there is already an activity registered\n");
 	// 	return -EINVAL;
 	// }
-	aid = check_for_act_init();
+	aid = wait_for_act_init();
+	wait_for_translate();
+	wait_for_translate();
+	wait_for_act_start();
+
 	if (aid == INVAL_AID) {
 		switch_to_inval();
 		return -EINVAL;
@@ -273,6 +277,8 @@ static int __init tcu_init(void)
 	priv_base = unpriv_base + (MMIO_UNPRIV_SIZE / sizeof(uint64_t));
 	rcv_buf = (uint8_t *)memremap(SIDE_RBUF_ADDR, KPEX_RBUF_SIZE,
 				      MEMREMAP_WB);
+	rpl_buf = (uint8_t *)memremap(TILEMUX_RBUF_SPACE, KPEX_RBUF_SIZE,
+				      MEMREMAP_WB);
 	snd_buf = (uint8_t *)kmalloc(MAX_MSG_SIZE, GFP_KERNEL);
 	// the message needs to be 16 byte aligned
 	BUG_ON(((uintptr_t)snd_buf) % 16 != 0);
@@ -280,6 +286,11 @@ static int __init tcu_init(void)
 	pr_info("tcu ioctl register act: %#x\n", IOCTL_RGSTR_ACT);
 	pr_info("tcu ioctl tlb insert: %#lx\n", IOCTL_TLB_INSRT);
 	pr_info("tcu ioctl exit: %#x\n", IOCTL_UNREG_ACT);
+
+	wait_for_get_quota();
+	wait_for_set_quota();
+	wait_for_derive_quota();
+	wait_for_get_quota();
 
 	return 0;
 }

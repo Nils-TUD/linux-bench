@@ -14,6 +14,8 @@ typedef uint64_t Reg;
 typedef uint64_t EpId;
 typedef uint64_t Label;
 typedef uint16_t ActId;
+typedef uint8_t TileId;
+typedef uint32_t Perm;
 
 // privileged activity id
 #define PRIV_AID 0xffff
@@ -37,6 +39,10 @@ typedef uint16_t ActId;
 
 /// The number of external registers
 #define EXT_REGS 2
+/// The number of unprivileged registers
+#define UNPRIV_REGS 6
+/// The number of registers per EP
+#define EP_REGS 3
 
 #define MAX_MSG_SIZE 512
 
@@ -122,6 +128,13 @@ static Reg read_unpriv_reg(unsigned int index)
 	return ioread64(unpriv_base + EXT_REGS + index);
 }
 
+static Reg read_ep_reg(EpId ep, size_t reg)
+{
+	BUG_ON(unpriv_base == NULL);
+	return ioread64(unpriv_base + EXT_REGS + UNPRIV_REGS + EP_REGS * ep +
+			reg);
+}
+
 static void write_priv_reg(unsigned int index, Reg val)
 {
 	BUG_ON(priv_base == NULL);
@@ -161,8 +174,8 @@ static Error insert_tlb(uint16_t asid, uint64_t virt, uint64_t phys,
 {
 	Reg cmd;
 	Error e;
-	pr_info("tlb insert: asid: %#hx, virt: %#llx, phys: %#llx\n", asid, virt,
-		phys);
+	pr_info("tlb insert: asid: %#hx, virt: %#llx, phys: %#llx\n", asid,
+		virt, phys);
 	BUG_ON(phys >> 32 != 0);
 	write_priv_reg(PrivReg_PRIV_CMD_ARG, virt & PAGE_MASK);
 	mb();
@@ -231,7 +244,7 @@ static Error reply_aligned(EpId ep, uint8_t *reply, size_t len, size_t msg_off)
 	write_unpriv_reg(UnprivReg_DATA_ADDR, reply_addr);
 	write_unpriv_reg(UnprivReg_DATA_SIZE, (Reg)len);
 	return perform_send_reply(reply_addr,
-			   build_cmd(ep, CmdOpCode_REPLY, (Reg)msg_off));
+				  build_cmd(ep, CmdOpCode_REPLY, (Reg)msg_off));
 }
 
 // returns ~(size_t)0 if there is no message or there was an error
@@ -254,6 +267,30 @@ static Error ack_msg(EpId ep, size_t msg_off)
 	write_unpriv_reg(UnprivReg_COMMAND,
 			 build_cmd(ep, CmdOpCode_ACK_MSG, (Reg)msg_off));
 	return get_unpriv_error();
+}
+
+typedef struct {
+	TileId tid;
+	uint64_t addr;
+	uint64_t size;
+	Perm perm;
+} EpInfo;
+
+static void print_ep_info(EpId ep, EpInfo i)
+{
+	pr_info("PMP EP %llu (offset: %#llx, size: %#llx, perm: %#x)\n", ep,
+		i.addr, i.size, i.perm);
+}
+
+static EpInfo unpack_mem_ep(EpId ep)
+{
+	Reg r0 = read_ep_reg(ep, 0);
+	Reg r1 = read_ep_reg(ep, 1);
+	Reg r2 = read_ep_reg(ep, 2);
+	TileId tid = (r0 >> 23) & 0xff; // TODO: this only works on gem5
+	Perm perm = (r0 >> 19) & 0x3;
+	BUG_ON((r0 & 0x7) != 0x3); // ep must be a memory ep
+	return (EpInfo){ .tid = tid, .addr = r1, .size = r2, .perm = perm };
 }
 
 #endif // TCULIB_H
