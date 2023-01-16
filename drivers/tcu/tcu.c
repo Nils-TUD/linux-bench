@@ -34,12 +34,21 @@ typedef struct {
 	uint8_t perm;
 } TlbInsert;
 
+typedef struct {
+	uint64_t arg1;
+	uint64_t arg2;
+} NoopArg;
+
 // register an activity
 #define IOCTL_RGSTR_ACT _IO('q', 1)
 // inserts an entry in tcu tlb, uses current activity id
 #define IOCTL_TLB_INSRT _IOW('q', 2, TlbInsert *)
 // forgets about an activity
 #define IOCTL_UNREG_ACT _IO('q', 3)
+// noop
+#define IOCTL_NOOP      _IO('q', 4)
+// noop with argument
+#define IOCTL_NOOP_ARG  _IOW('q', 5, NoopArg *)
 
 static inline bool in_inval_mode(void)
 {
@@ -163,6 +172,20 @@ static int ioctl_unregister_activity(void)
 	return (int)e;
 }
 
+static int ioctl_noop(void)
+{
+	return 0;
+}
+
+static int ioctl_noop_arg(unsigned long arg)
+{
+	NoopArg na;
+	if (copy_from_user(&na, (NoopArg *)arg, sizeof(NoopArg))) {
+		return -EACCES;
+	}
+	return na.arg1 + na.arg2;
+}
+
 static long int tcu_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
 {
 	switch (cmd) {
@@ -172,6 +195,10 @@ static long int tcu_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
 		return ioctl_insert_tlb(arg);
 	case IOCTL_UNREG_ACT:
 		return ioctl_unregister_activity();
+	case IOCTL_NOOP:
+		return ioctl_noop();
+	case IOCTL_NOOP_ARG:
+		return ioctl_noop_arg(arg);
 	default:
 		pr_err("received ioctl call without unknown magic number\n");
 		return -EINVAL;
@@ -286,6 +313,8 @@ static int __init tcu_init(void)
 	pr_info("tcu ioctl register act: %#x\n", IOCTL_RGSTR_ACT);
 	pr_info("tcu ioctl tlb insert: %#lx\n", IOCTL_TLB_INSRT);
 	pr_info("tcu ioctl exit: %#x\n", IOCTL_UNREG_ACT);
+	pr_info("tcu ioctl noop: %#x\n", IOCTL_NOOP);
+	pr_info("tcu ioctl noop with arg: %#lx\n", IOCTL_NOOP_ARG);
 
 	wait_for_get_quota();
 	wait_for_set_quota();

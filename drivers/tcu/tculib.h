@@ -174,8 +174,8 @@ static Error insert_tlb(uint16_t asid, uint64_t virt, uint64_t phys,
 {
 	Reg cmd;
 	Error e;
-	pr_info("tlb insert: asid: %#hx, virt: %#llx, phys: %#llx\n", asid,
-		virt, phys);
+	// pr_info("tlb insert: asid: %#hx, virt: %#llx, phys: %#llx\n", asid,
+	// 	virt, phys);
 	BUG_ON(phys >> 32 != 0);
 	write_priv_reg(PrivReg_PRIV_CMD_ARG, virt & PAGE_MASK);
 	mb();
