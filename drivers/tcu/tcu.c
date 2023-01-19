@@ -18,6 +18,7 @@
 
 // kmalloc
 #include <linux/slab.h>
+#include <linux/delay.h>
 
 typedef struct {
 	// current activity id
@@ -30,11 +31,6 @@ typedef struct {
 static state_t state = { .cur_aid = PRIV_AID, .aid = INVAL_AID };
 
 typedef struct {
-	uint64_t virt;
-	uint8_t perm;
-} TlbInsert;
-
-typedef struct {
 	uint64_t arg1;
 	uint64_t arg2;
 } NoopArg;
@@ -42,7 +38,7 @@ typedef struct {
 // register an activity
 #define IOCTL_RGSTR_ACT _IO('q', 1)
 // inserts an entry in tcu tlb, uses current activity id
-#define IOCTL_TLB_INSRT _IOW('q', 2, TlbInsert *)
+#define IOCTL_TLB_INSRT _IOW('q', 2, unsigned long)
 // forgets about an activity
 #define IOCTL_UNREG_ACT _IO('q', 3)
 // noop
@@ -140,22 +136,21 @@ static unsigned long vaddr2paddr(unsigned long address)
 
 static int ioctl_insert_tlb(unsigned long arg)
 {
-	TlbInsert ti;
 	uint64_t phys;
+	uint64_t virt;
+	uint8_t perm;
 	BUG_ON(in_priv_mode());
 	if (!in_unpriv_mode()) {
 		pr_err("there is no activity registered\n");
 	}
-	if (copy_from_user(&ti, (TlbInsert *)arg, sizeof(TlbInsert))) {
-		return -EACCES;
-	}
-	// TODO: check that it is mapped for the current process?
-	phys = vaddr2paddr(ti.virt);
+	virt = arg & PAGE_MASK;
+	perm = (uint8_t)(arg & 0xf);
+	phys = vaddr2paddr(virt);
 	if (phys == 0) {
 		pr_err("tlb insert: virtual address is not mapped\n");
 		return -EINVAL;
 	}
-	return (int)insert_tlb(state.cur_aid, ti.virt, phys, ti.perm);
+	return (int)insert_tlb(state.cur_aid, virt, phys, perm);
 }
 
 static int ioctl_unregister_activity(void)
